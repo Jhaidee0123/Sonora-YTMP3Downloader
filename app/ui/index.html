@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sonora</title>
+<style>
+  :root {
+    --bg: #0B0B12;
+    --surface: rgba(255, 255, 255, 0.045);
+    --surface-strong: rgba(255, 255, 255, 0.07);
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.14);
+    --text: #F4F4F8;
+    --muted: #9C9CB2;
+    --faint: #5E5E74;
+    --accent-1: #FF5C87;
+    --accent-2: #9B6BFF;
+    --accent: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+    --ok: #3DDC97;
+    --warn: #FFB547;
+    --err: #FF6B7A;
+    --glow-1: rgba(255, 92, 135, 0.22);
+    --glow-2: rgba(155, 107, 255, 0.20);
+    --shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.6);
+    --thumb-bg: #1A1A26;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #F5F4FA;
+      --surface: rgba(255, 255, 255, 0.75);
+      --surface-strong: #FFFFFF;
+      --border: rgba(24, 20, 48, 0.08);
+      --border-strong: rgba(24, 20, 48, 0.16);
+      --text: #16151F;
+      --muted: #6A6880;
+      --faint: #A4A2B8;
+      --glow-1: rgba(255, 92, 135, 0.16);
+      --glow-2: rgba(155, 107, 255, 0.16);
+      --shadow: 0 20px 50px -24px rgba(40, 30, 90, 0.25);
+      --thumb-bg: #E9E7F2;
+      color-scheme: light;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  body::before, body::after {
+    content: "";
+    position: fixed;
+    width: 520px; height: 520px;
+    border-radius: 50%;
+    filter: blur(90px);
+    pointer-events: none;
+    z-index: 0;
+  }
+  body::before { background: var(--glow-1); top: -220px; left: -160px; }
+  body::after { background: var(--glow-2); top: -180px; right: -200px; }
+
+  .app {
+    position: relative;
+    z-index: 1;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 28px 24px 40px;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .logo {
+    width: 42px; height: 42px;
+    border-radius: 13px;
+    background: var(--accent);
+    display: grid;
+    place-items: center;
+    box-shadow: 0 8px 24px -8px var(--accent-1);
+    flex: none;
+  }
+  .logo svg { width: 22px; height: 22px; }
+  .brand h1 {
+    margin: 0;
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .brand p { margin: 1px 0 0; color: var(--muted); font-size: 13px; }
+  .engine {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px 6px 10px;
+    border-radius: 999px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--faint);
+    flex: none;
+  }
+  .engine[data-state="ready"] .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(61, 220, 151, 0.18); }
+  .engine[data-state="updating"] .dot,
+  .engine[data-state="installing"] .dot { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+  .engine[data-state="error"] .dot { background: var(--err); }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+
+  /* ---------- Composer ---------- */
+  .composer {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .composer:focus-within, .composer.drag {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow), 0 0 0 4px rgba(155, 107, 255, 0.12);
+  }
+  textarea {
+    display: block;
+    width: 100%;
+    min-height: 76px;
+    max-height: 180px;
+    resize: none;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 15px;
+    padding: 14px 16px 6px;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  textarea::placeholder { color: var(--faint); }
+  .hint {
+    padding: 0 16px 12px;
+    color: var(--faint);
+    font-size: 12px;
+  }
+  kbd {
+    font: inherit;
+    padding: 1px 6px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px;
+    border-top: 1px solid var(--border);
+  }
+
+  .segmented {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+  .segmented button {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 5px 12px;
+    border-radius: 9px;
+    font: inherit;
+    cursor: pointer;
+    line-height: 1.15;
+    text-align: left;
+    transition: background 0.15s, color 0.15s;
+  }
+  .segmented button b { display: block; font-size: 13px; font-weight: 600; }
+  .segmented button span { font-size: 11px; color: var(--faint); }
+  .segmented button:hover { color: var(--text); }
+  .segmented button.on {
+    background: var(--surface-strong);
+    color: var(--text);
+    box-shadow: 0 1px 0 var(--border-strong) inset, 0 4px 12px -6px rgba(0, 0, 0, 0.5);
+  }
+  .segmented button.on span { color: var(--muted); }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 38px;
+    padding: 0 13px;
+    border-radius: 11px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.1s;
+  }
+  .btn:hover { color: var(--text); border-color: var(--border-strong); }
+  .btn:active { transform: scale(0.97); }
+  .btn svg { width: 16px; height: 16px; flex: none; }
+  .btn.folder { max-width: 220px; }
+  .btn.folder .path { overflow: hidden; text-overflow: ellipsis; }
+  .btn.primary {
+    margin-left: auto;
+    height: 42px;
+    padding: 0 18px;
+    border: 0;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    font-size: 14px;
+    box-shadow: 0 10px 24px -10px var(--accent-1);
+  }
+  .btn.primary:disabled { opacity: 0.4; cursor: default; box-shadow: none; transform: none; }
+  .btn.icon { width: 34px; height: 34px; padding: 0; justify-content: center; border-radius: 10px; }
+
+  /* ---------- Queue ---------- */
+  .queue-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 30px 2px 12px;
+    flex-wrap: wrap;
+  }
+  .queue-head h2 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+  .queue-head .stats { color: var(--muted); font-size: 13px; }
+  .queue-head .actions { margin-left: auto; display: flex; gap: 6px; }
+  .queue-head .btn { height: 32px; }
+
+  .list { display: flex; flex-direction: column; gap: 10px; }
+  .card {
+    display: grid;
+    grid-template-columns: 116px 1fr auto;
+    gap: 14px;
+    align-items: center;
+    padding: 10px 12px 10px 10px;
+    border-radius: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    animation: enter 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @keyframes enter { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
+  .thumb {
+    position: relative;
+    width: 116px;
+    aspect-ratio: 16 / 9;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--thumb-bg);
+  }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: 0; transition: opacity 0.3s; }
+  .thumb img.loaded { opacity: 1; }
+  .thumb .badge {
+    position: absolute;
+    right: 5px; bottom: 5px;
+    padding: 1px 5px;
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .thumb .badge:empty { display: none; }
+  .info { min-width: 0; }
+  .title {
+    font-size: 14.5px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .title.pending { color: var(--muted); font-weight: 500; }
+  .sub {
+    color: var(--muted);
+    font-size: 12.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+  }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .track {
+    flex: 1;
+    height: 5px;
+    border-radius: 99px;
+    background: var(--surface-strong);
+    overflow: hidden;
+    position: relative;
+  }
+  .fill {
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 0.3s ease;
+  }
+  .card[data-state="converting"] .fill,
+  .card[data-state="starting"] .fill,
+  .card[data-state="retrying"] .fill {
+    width: 35% !important;
+    animation: slide 1.1s ease-in-out infinite;
+  }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+  .label { white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .card[data-state="done"] .track,
+  .card[data-state="error"] .track { display: none; }
+  .card[data-state="done"] .label { color: var(--ok); }
+  .card[data-state="error"] .label { color: var(--err); white-space: normal; }
+  .card[data-state="retrying"] .label { color: var(--warn); }
+  .card .act { display: none; }
+  .card[data-state="done"] .act.reveal,
+  .card[data-state="error"] .act.retry { display: inline-flex; }
+
+  .empty {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--muted);
+    border: 1px dashed var(--border-strong);
+    border-radius: 18px;
+  }
+  .empty svg { width: 34px; height: 34px; color: var(--faint); margin-bottom: 8px; }
+  .empty b { display: block; color: var(--text); font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+
+  @media (max-width: 620px) {
+    .app { padding: 20px 16px 32px; }
+    .engine .txt { display: none; }
+    .btn.folder .path { display: none; }
+    .card { grid-template-columns: 84px 1fr auto; gap: 10px; }
+    .thumb { width: 84px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round">
+        <path d="M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4"/>
+      </svg>
+    </div>
+    <div class="brand">
+      <h1>Sonora</h1>
+      <p>Audio de YouTube en la mejor calidad</p>
+    </div>
+    <div class="engine" id="engine" data-state="installing" title="Motor de descargas (yt-dlp)">
+      <span class="dot"></span><span class="txt" id="engine-txt">Preparando…</span>
+    </div>
+  </header>
+
+  <section class="composer" id="composer">
+    <textarea id="urls" rows="2" spellcheck="false" autofocus
+      placeholder="Pega uno o varios enlaces de YouTube…"></textarea>
+    <div class="hint">Uno por línea o separados por espacios · <kbd id="kbd">⌘ ↩</kbd> para descargar</div>
+    <div class="bar">
+      <div class="segmented" id="quality" role="radiogroup" aria-label="Calidad">
+        <button data-q="flac" role="radio" title="Sin pérdida: la mejor pista de YouTube sin volver a comprimir. Archivos grandes."><b>FLAC</b><span>Sin pérdida</span></button>
+        <button data-q="mp3" role="radio" title="MP3 a 320 kbps: compatible con todo."><b>MP3</b><span>320 kbps</span></button>
+        <button data-q="m4a" role="radio" title="AAC tal cual lo entrega YouTube, sin recodificar."><b>M4A</b><span>Original</span></button>
+      </div>
+      <button class="btn folder" id="folder" title="Carpeta de destino">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.6l2 2.2h7.4A2.5 2.5 0 0 1 21 9.7v7.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/></svg>
+        <span class="path" id="folder-path">Música</span>
+      </button>
+      <button class="btn icon" id="import" title="Importar enlaces desde un .txt">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14l3 3 3-3"/></svg>
+      </button>
+      <button class="btn primary" id="go" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+        <span id="go-txt">Descargar</span>
+      </button>
+    </div>
+  </section>
+
+  <div class="queue-head">
+    <h2>Descargas</h2>
+    <span class="stats" id="stats"></span>
+    <div class="actions">
+      <button class="btn" id="clear" hidden>Limpiar completadas</button>
+      <button class="btn" id="open">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
+        Abrir carpeta
+      </button>
+    </div>
+  </div>
+
+  <div class="list" id="list"></div>
+  <div class="empty" id="empty">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+    <b>Aún no hay descargas</b>
+    Pega enlaces arriba o arrástralos a la ventana
+  </div>
+</div>
+
+<template id="card-tpl">
+  <div class="card" data-state="queued">
+    <div class="thumb"><img alt=""><span class="badge"></span></div>
+    <div class="info">
+      <div class="title pending"></div>
+      <div class="sub"></div>
+      <div class="status">
+        <div class="track"><div class="fill"></div></div>
+        <span class="label">En cola</span>
+      </div>
+    </div>
+    <div>
+      <button class="btn icon act reveal" title="Mostrar archivo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+      </button>
+      <button class="btn icon act retry" title="Reintentar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.5 6.2L3 16M3 21v-5h5"/></svg>
+      </button>
+    </div>
+  </div>
+</template>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const QUALITY_NAMES = { flac: "FLAC", mp3: "MP3", m4a: "M4A" };
+const URL_RE = /https?:\/\/[^\s"'<>]+/g;
+const jobs = new Map();
+let api = null;
+let quality = "flac";
+
+function parseUrls(text) {
+  const found = (text.match(URL_RE) || []).map((u) => u.replace(/[.,;)]+$/, ""));
+  return [...new Set(found)];
+}
+
+function videoId(url) {
+  const m = url.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([\w-]{11})/);
+  return m ? m[1] : null;
+}
+
+function shortPath(path) {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.slice(-2).join("/") || path;
+}
+
+/* ---------- Composer ---------- */
+const urlsEl = $("urls");
+
+function refreshComposer() {
+  const n = parseUrls(urlsEl.value).length;
+  $("go").disabled = n === 0;
+  $("go-txt").textContent = n > 1 ? `Descargar ${n}` : "Descargar";
+  urlsEl.style.height = "auto";
+  urlsEl.style.height = Math.min(urlsEl.scrollHeight, 180) + "px";
+}
+
+async function submit() {
+  const text = urlsEl.value;
+  if (!parseUrls(text).length || !api) return;
+  urlsEl.value = "";
+  refreshComposer();
+  const created = await api.add_urls(text);
+  created.forEach((job) => addCard(job));
+}
+
+function setQuality(q) {
+  quality = q;
+  document.querySelectorAll("#quality button").forEach((b) => {
+    const on = b.dataset.q === q;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", on);
+  });
+}
+
+urlsEl.addEventListener("input", refreshComposer);
+urlsEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
+});
+$("go").addEventListener("click", submit);
+$("quality").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  setQuality(b.dataset.q);
+  api && api.set_quality(b.dataset.q);
+});
+$("folder").addEventListener("click", async () => {
+  const path = await api.choose_folder();
+  $("folder-path").textContent = shortPath(path);
+  $("folder").title = path;
+});
+$("import").addEventListener("click", async () => {
+  const text = await api.import_txt();
+  if (!text) return;
+  const urls = parseUrls(text);
+  urlsEl.value = (urlsEl.value.trim() + "\n" + urls.join("\n")).trim();
+  refreshComposer();
+  urlsEl.focus();
+});
+$("open").addEventListener("click", () => api && api.open_folder());
+$("clear").addEventListener("click", () => {
+  for (const [id, job] of jobs) {
+    if (job.state === "done") { job.el.remove(); jobs.delete(id); }
+  }
+  refreshStats();
+});
+
+// Arrastrar enlaces a la ventana
+const composer = $("composer");
+window.addEventListener("dragover", (e) => { e.preventDefault(); composer.classList.add("drag"); });
+window.addEventListener("dragleave", (e) => { if (!e.relatedTarget) composer.classList.remove("drag"); });
+window.addEventListener("drop", (e) => {
+  e.preventDefault();
+  composer.classList.remove("drag");
+  const text = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
+  if (text) { urlsEl.value = (urlsEl.value.trim() + "\n" + text).trim(); refreshComposer(); }
+});
+
+/* ---------- Cola ---------- */
+function addCard({ id, url }) {
+  const el = $("card-tpl").content.firstElementChild.cloneNode(true);
+  const job = { id, url, el, state: "queued", quality };
+  jobs.set(id, job);
+
+  const vid = videoId(url);
+  const img = el.querySelector("img");
+  img.addEventListener("load", () => img.classList.add("loaded"));
+  if (vid) img.src = `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`;
+  el.querySelector(".title").textContent = url;
+  el.querySelector(".sub").textContent = QUALITY_NAMES[quality];
+  el.querySelector(".reveal").addEventListener("click", () => api.reveal(job.path));
+  el.querySelector(".retry").addEventListener("click", () => {
+    setState(job, "queued", "En cola");
+    api.retry(id);
+  });
+
+  $("list").prepend(el);
+  refreshStats();
+}
+
+function setState(job, state, label) {
+  job.state = state;
+  job.el.dataset.state = state;
+  if (label !== undefined) job.el.querySelector(".label").textContent = label;
+  refreshStats();
+}
+
+function refreshStats() {
+  const all = [...jobs.values()];
+  const done = all.filter((j) => j.state === "done").length;
+  const failed = all.filter((j) => j.state === "error").length;
+  $("empty").hidden = all.length > 0;
+  $("clear").hidden = done === 0;
+  let txt = all.length ? `${done} de ${all.length} completadas` : "";
+  if (failed) txt += ` · ${failed} con error`;
+  $("stats").textContent = txt;
+}
+
+function onJobEvent(e) {
+  const job = jobs.get(e.id);
+  if (!job) return;
+  const el = job.el;
+
+  if (e.meta) {
+    const m = e.meta;
+    const title = el.querySelector(".title");
+    title.textContent = m.fulltitle || job.url;
+    title.classList.remove("pending");
+    el.querySelector(".sub").textContent =
+      [m.uploader, QUALITY_NAMES[job.quality]].filter(Boolean).join(" · ");
+    el.querySelector(".badge").textContent = m.duration_string || "";
+  }
+
+  switch (e.state) {
+    case "starting":
+      setState(job, "starting", "Preparando…");
+      break;
+    case "downloading":
+      if (e.percent !== undefined) {
+        el.querySelector(".fill").style.width = e.percent + "%";
+        const bits = [`${Math.floor(e.percent)}%`];
+        if (e.speed && !/unknown|N\/A/i.test(e.speed)) bits.push(e.speed);
+        if (e.eta && !/unknown|N\/A/i.test(e.eta) && e.percent < 100) bits.push(`${e.eta} restante`);
+        setState(job, "downloading", bits.join(" · "));
+      } else {
+        setState(job, "downloading", "Descargando…");
+      }
+      break;
+    case "converting":
+      setState(job, "converting", `Convirtiendo a ${QUALITY_NAMES[job.quality]}…`);
+      break;
+    case "retrying":
+      setState(job, "retrying", "YouTube bloqueó la descarga · actualizando y reintentando…");
+      break;
+    case "done":
+      job.path = e.path;
+      setState(job, "done", "✓ Lista");
+      break;
+    case "error":
+      setState(job, "error", e.message || "Error al descargar");
+      break;
+  }
+}
+
+function onEngine(e) {
+  const pill = $("engine");
+  pill.dataset.state = e.state;
+  const txt = {
+    installing: "Instalando motor…",
+    updating: "Buscando actualizaciones…",
+    ready: `yt-dlp ${e.version || ""}`.trim(),
+    error: "Error en el motor",
+  }[e.state];
+  $("engine-txt").textContent = txt;
+  pill.title = e.state === "error" ? e.message : "Motor de descargas (yt-dlp), se actualiza solo";
+}
+
+window.onEngineEvent = (e) => (e.type === "engine" ? onEngine(e) : onJobEvent(e));
+
+/* ---------- Arranque ---------- */
+async function start() {
+  api = window.pywebview.api;
+  const { settings, platform } = await api.init();
+  setQuality(settings.quality);
+  $("folder-path").textContent = shortPath(settings.out_dir);
+  $("folder").title = settings.out_dir;
+  if (platform !== "darwin") $("kbd").textContent = "Ctrl ↩";
+  refreshStats();
+}
+
+setQuality(quality);
+refreshComposer();
+refreshStats();
+if (window.pywebview && window.pywebview.api && window.pywebview.api.init) start();
+else window.addEventListener("pywebviewready", start);
+</script>
+</body>
+</html>

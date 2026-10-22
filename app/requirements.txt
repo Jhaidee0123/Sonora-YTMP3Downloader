@@ -1,0 +1,4 @@
+pywebview>=6.0
+certifi
+pyinstaller>=6.0
+pillow; sys_platform == "win32"

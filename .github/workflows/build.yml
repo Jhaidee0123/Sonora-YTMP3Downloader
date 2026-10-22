@@ -1,0 +1,42 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "app/**"
+      - ".github/workflows/build.yml"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: Sonora-Windows
+            path: dist/Sonora.exe
+          - os: macos-15-intel
+            artifact: Sonora-Mac-Intel
+            path: dist/Sonora-Intel.dmg
+          - os: macos-latest
+            artifact: Sonora-Mac-AppleSilicon
+            path: dist/Sonora-AppleSilicon.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install -r app/requirements.txt
+
+      - name: Empaquetar Sonora
+        run: python app/build.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.path }}

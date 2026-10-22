@@ -2,14 +2,18 @@
 """
 Empaqueta Sonora como app nativa con PyInstaller.
 
-    Mac:      venv/bin/python app/build.py      -> dist/Sonora.app
+    Mac:      venv/bin/python app/build.py      -> dist/Sonora.app y dist/Sonora-<arq>.dmg
     Windows:  venv\\Scripts\\python app\\build.py  -> dist\\Sonora.exe
 
 Hay que correrlo en cada sistema: PyInstaller no genera el .exe desde Mac.
 """
 
 import os
+import platform
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import PyInstaller.__main__
@@ -37,3 +41,24 @@ else:
     args += ["--icon", str(HERE / "icon.png"), "--onefile"]
 
 PyInstaller.__main__.run(args)
+
+
+def make_dmg():
+    """Arma un .dmg con la app y un acceso directo a Aplicaciones para arrastrarla."""
+    arch = "AppleSilicon" if platform.machine() == "arm64" else "Intel"
+    dmg = ROOT / "dist" / f"Sonora-{arch}.dmg"
+    with tempfile.TemporaryDirectory() as tmp:
+        stage = Path(tmp)
+        subprocess.run(["ditto", str(ROOT / "dist" / "Sonora.app"), str(stage / "Sonora.app")], check=True)
+        (stage / "Aplicaciones").symlink_to("/Applications")
+        dmg.unlink(missing_ok=True)
+        subprocess.run(
+            ["hdiutil", "create", "-volname", "Sonora", "-srcfolder", str(stage),
+             "-ov", "-format", "UDZO", str(dmg)],
+            check=True,
+        )
+    print(f"Instalador listo: {dmg}")
+
+
+if sys.platform == "darwin" and shutil.which("hdiutil"):
+    make_dmg()

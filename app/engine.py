@@ -9,6 +9,7 @@ guardado en la carpeta de datos del usuario, para poder actualizarlo con
 import io
 import json
 import os
+import platform
 import re
 import shutil
 import ssl
@@ -32,6 +33,17 @@ FFMPEG_WIN_URL = (
     "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/"
     "ffmpeg-master-latest-win64-gpl.zip"
 )
+# En Mac no hay descarga oficial de ffmpeg: se usa el binario autocontenido
+# que publica el paquete imageio-ffmpeg en PyPI (solo depende del sistema).
+FFMPEG_MAC_INDEX = "https://pypi.org/pypi/imageio-ffmpeg/json"
+
+ARCH = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x86_64"
+# yt-dlp necesita un runtime de JavaScript (Deno) para extraer bien de YouTube
+DENO_TARGET = {
+    "win32": "x86_64-pc-windows-msvc",
+    "darwin": "aarch64-apple-darwin" if ARCH == "arm64" else "x86_64-apple-darwin",
+}.get(sys.platform, f"{'aarch64' if ARCH == 'arm64' else 'x86_64'}-unknown-linux-gnu")
+DENO_URL = f"https://github.com/denoland/deno/releases/latest/download/deno-{DENO_TARGET}.zip"
 
 # En Windows evita que cada subproceso abra una consola
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if IS_WIN else 0
@@ -67,7 +79,9 @@ def data_dir():
 
 
 BIN_DIR = data_dir() / "bin"
-YTDLP_PATH = BIN_DIR / ("yt-dlp.exe" if IS_WIN else "yt-dlp")
+EXE = ".exe" if IS_WIN else ""
+YTDLP_PATH = BIN_DIR / f"yt-dlp{EXE}"
+DENO_PATH = BIN_DIR / f"deno{EXE}"
 
 
 def parse_urls(text):
@@ -101,15 +115,44 @@ def _run(args, timeout=180):
     )
 
 
+def _install(path, data):
+    """Guarda un ejecutable de forma atomica (sin dejar archivos a medias)."""
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".part")
+    tmp.write_bytes(data)
+    tmp.chmod(tmp.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    tmp.replace(path)
+
+
+def _from_zip(zip_bytes, match):
+    """Devuelve el contenido del primer archivo del zip cuyo nombre cumpla `match`."""
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
+        for name in archive.namelist():
+            if match(name.rsplit("/", 1)[-1]):
+                return archive.read(name)
+    raise RuntimeError("El archivo descargado no contiene el ejecutable esperado")
+
+
 def ensure_ytdlp():
     """Descarga el ejecutable de yt-dlp si todavia no existe."""
-    if YTDLP_PATH.exists():
-        return
-    BIN_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = YTDLP_PATH.with_suffix(".part")
-    tmp.write_bytes(_fetch(YTDLP_URL))
-    tmp.chmod(tmp.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-    tmp.replace(YTDLP_PATH)
+    if not YTDLP_PATH.exists():
+        _install(YTDLP_PATH, _fetch(YTDLP_URL))
+
+
+def find_deno():
+    if DENO_PATH.exists():
+        return DENO_PATH
+    found = shutil.which("deno", path=_env()["PATH"])
+    return Path(found) if found else None
+
+
+def ensure_deno():
+    """Busca Deno; si no esta instalado lo descarga."""
+    found = find_deno()
+    if found:
+        return found
+    _install(DENO_PATH, _from_zip(_fetch(DENO_URL), lambda n: n == DENO_PATH.name))
+    return DENO_PATH
 
 
 def ytdlp_version():
@@ -141,18 +184,22 @@ def find_ffmpeg():
 
 
 def ensure_ffmpeg():
-    """Busca ffmpeg; en Windows lo descarga si hace falta."""
+    """Busca ffmpeg; si no esta instalado lo descarga."""
     folder = find_ffmpeg()
     if folder:
         return folder
-    if not IS_WIN:
-        raise RuntimeError("No se encontró ffmpeg. Instálalo con: brew install ffmpeg")
 
-    with zipfile.ZipFile(io.BytesIO(_fetch(FFMPEG_WIN_URL))) as archive:
-        for name in archive.namelist():
-            base = name.rsplit("/", 1)[-1]
-            if base in ("ffmpeg.exe", "ffprobe.exe"):
-                (BIN_DIR / base).write_bytes(archive.read(name))
+    if IS_WIN:
+        data = _fetch(FFMPEG_WIN_URL)
+        for exe in ("ffprobe.exe", "ffmpeg.exe"):
+            _install(BIN_DIR / exe, _from_zip(data, lambda n, exe=exe: n == exe))
+    elif IS_MAC:
+        files = json.loads(_fetch(FFMPEG_MAC_INDEX))["urls"]
+        tag = "arm64" if ARCH == "arm64" else "x86_64"
+        wheel = next(f["url"] for f in files if "macosx" in f["filename"] and tag in f["filename"])
+        _install(BIN_DIR / "ffmpeg", _from_zip(_fetch(wheel), lambda n: n.startswith("ffmpeg-")))
+    else:
+        raise RuntimeError("No se encontró ffmpeg. Instálalo con el gestor de paquetes del sistema")
     return BIN_DIR
 
 
@@ -165,17 +212,19 @@ class Engine:
         self.error = None
         self.version = None
         self.ffmpeg_dir = None
+        self.deno_path = None
         self._update_lock = threading.Lock()
         self._procs = set()
 
     def setup(self):
-        """Instala/actualiza yt-dlp y ubica ffmpeg. Corre en un hilo aparte."""
+        """Instala/actualiza yt-dlp, ffmpeg y Deno. Corre en un hilo aparte."""
         try:
-            first_run = not YTDLP_PATH.exists()
-            self.emit({"type": "engine", "state": "installing" if first_run else "updating"})
+            missing = not (YTDLP_PATH.exists() and find_ffmpeg() and find_deno())
+            self.emit({"type": "engine", "state": "installing" if missing else "updating"})
             ensure_ytdlp()
-            self.version = update_ytdlp()
             self.ffmpeg_dir = ensure_ffmpeg()
+            self.deno_path = ensure_deno()
+            self.version = update_ytdlp()
             self.emit({"type": "engine", "state": "ready", "version": self.version})
         except Exception as e:  # noqa: BLE001
             self.error = str(e)
@@ -217,6 +266,7 @@ class Engine:
             str(YTDLP_PATH), url,
             "--no-playlist", "--newline", "--progress", "--no-colors",
             "--ffmpeg-location", str(self.ffmpeg_dir),
+            "--js-runtimes", f"deno:{self.deno_path}",
             *QUALITIES.get(quality, QUALITIES["flac"]),
             # "Artista - Cancion" en el titulo -> etiquetas separadas
             "--parse-metadata", "title:%(artist)s - %(title)s",

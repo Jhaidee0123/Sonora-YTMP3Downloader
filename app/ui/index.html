@@ -640,7 +640,7 @@ function onEngine(e) {
   const pill = $("engine");
   pill.dataset.state = e.state;
   const txt = {
-    installing: "Instalando motor…",
+    installing: "Instalando componentes (solo la primera vez)…",
     updating: "Buscando actualizaciones…",
     ready: `yt-dlp ${e.version || ""}`.trim(),
     error: "Error en el motor",

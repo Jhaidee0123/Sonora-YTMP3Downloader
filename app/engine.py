@@ -32,8 +32,14 @@ APP_NAME = "Sonora"
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 
-YTDLP_ASSET = {"win32": "yt-dlp.exe", "darwin": "yt-dlp_macos"}.get(sys.platform, "yt-dlp")
-YTDLP_URL = f"https://github.com/yt-dlp/yt-dlp/releases/latest/download/{YTDLP_ASSET}"
+# Version "carpeta" de yt-dlp: arranca en ~0,3 s. La de un solo archivo se
+# descomprime en cada uso y tarda ~8 s por cancion.
+YTDLP_ZIP, YTDLP_EXE = {
+    "win32": ("yt-dlp_win.zip", "yt-dlp.exe"),
+    "darwin": ("yt-dlp_macos.zip", "yt-dlp_macos"),
+}.get(sys.platform, ("yt-dlp_linux.zip", "yt-dlp_linux"))
+YTDLP_RELEASES = "https://github.com/yt-dlp/yt-dlp/releases/latest"
+YTDLP_URL = f"{YTDLP_RELEASES}/download/{YTDLP_ZIP}"
 FFMPEG_WIN_URL = (
     "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/"
     "ffmpeg-master-latest-win64-gpl.zip"
@@ -89,7 +95,9 @@ def data_dir():
 
 BIN_DIR = data_dir() / "bin"
 EXE = ".exe" if IS_WIN else ""
-YTDLP_PATH = BIN_DIR / f"yt-dlp{EXE}"
+YTDLP_DIR = BIN_DIR / "yt-dlp-dist"
+YTDLP_PATH = YTDLP_DIR / YTDLP_EXE
+YTDLP_LEGACY = BIN_DIR / f"yt-dlp{EXE}"  # version de un solo archivo (Sonora <= 1.2)
 # Canciones descargadas para recortar: se borran al cerrar la app
 TRIM_DIR = data_dir() / "trim"
 DENO_PATH = BIN_DIR / f"deno{EXE}"
@@ -119,6 +127,14 @@ def _fetch(url):
         return resp.read()
 
 
+def _final_url(url):
+    """URL final tras las redirecciones, sin descargar el contenido."""
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": APP_NAME})
+    with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
+        return resp.geturl()
+
+
 def _run(args, timeout=180):
     return subprocess.run(
         args, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -144,10 +160,37 @@ def _from_zip(zip_bytes, match):
     raise RuntimeError("El archivo descargado no contiene el ejecutable esperado")
 
 
+def install_ytdlp():
+    """Descarga la ultima version de yt-dlp y reemplaza la instalada."""
+    new = BIN_DIR / "yt-dlp-new"
+    old = BIN_DIR / "yt-dlp-old"
+    shutil.rmtree(new, ignore_errors=True)
+    with zipfile.ZipFile(io.BytesIO(_fetch(YTDLP_URL))) as archive:
+        for info in archive.infolist():
+            target = archive.extract(info, new)
+            mode = info.external_attr >> 16
+            if mode and not info.is_dir():
+                os.chmod(target, mode)  # zipfile no conserva el permiso de ejecucion
+    if not (new / YTDLP_EXE).exists():
+        raise RuntimeError("La descarga de yt-dlp no contiene el ejecutable esperado")
+
+    shutil.rmtree(old, ignore_errors=True)
+    if YTDLP_DIR.exists():
+        YTDLP_DIR.rename(old)
+    new.rename(YTDLP_DIR)
+    shutil.rmtree(old, ignore_errors=True)
+    if YTDLP_LEGACY.is_file():
+        YTDLP_LEGACY.unlink()
+    # La primera ejecucion es lenta (macOS revisa los archivos nuevos): se hace
+    # ahora, durante la instalacion, y no en la primera descarga
+    version = _run([str(YTDLP_PATH), "--version"], timeout=300).stdout.strip()
+    (YTDLP_DIR / ".version").write_text(version)
+    return version
+
+
 def ensure_ytdlp():
-    """Descarga el ejecutable de yt-dlp si todavia no existe."""
     if not YTDLP_PATH.exists():
-        _install(YTDLP_PATH, _fetch(YTDLP_URL))
+        install_ytdlp()
 
 
 def find_deno():
@@ -178,17 +221,25 @@ def update_deno():
 
 
 def ytdlp_version():
-    result = _run([str(YTDLP_PATH), "--version"], timeout=60)
-    return result.stdout.strip() or None
+    try:
+        return (YTDLP_DIR / ".version").read_text().strip()
+    except OSError:
+        return _run([str(YTDLP_PATH), "--version"], timeout=300).stdout.strip() or None
 
 
 def update_ytdlp():
-    """Actualiza yt-dlp a la ultima version. Devuelve la version instalada."""
+    """Actualiza yt-dlp si hay una version nueva. Devuelve la version instalada.
+
+    La version carpeta no se actualiza sola (`yt-dlp -U`), asi que se compara
+    con la ultima publicada (la redireccion de /releases/latest lleva el numero)."""
+    installed = ytdlp_version()
     try:
-        _run([str(YTDLP_PATH), "-U"])
-    except (OSError, subprocess.TimeoutExpired):
-        pass  # Sin internet: se sigue con la version que ya hay
-    return ytdlp_version()
+        latest = _final_url(YTDLP_RELEASES).rstrip("/").rsplit("/", 1)[-1]
+        if latest and latest != installed:
+            return install_ytdlp()
+    except Exception:  # noqa: BLE001 - sin internet o yt-dlp en uso (Windows): seguir
+        pass
+    return installed
 
 
 def find_ffmpeg():

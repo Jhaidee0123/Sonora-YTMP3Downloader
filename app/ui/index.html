@@ -94,6 +94,7 @@
     flex: none;
   }
   .logo svg { width: 22px; height: 22px; }
+  .brand .ver { color: var(--faint); font-size: 12px; font-weight: 500; margin-left: 4px; letter-spacing: 0; }
   .brand h1 {
     margin: 0;
     font-size: 21px;
@@ -334,6 +335,7 @@
     transition: width 0.3s ease;
   }
   .card[data-state="converting"] .fill,
+  .card[data-state="tagging"] .fill,
   .card[data-state="starting"] .fill,
   .card[data-state="retrying"] .fill {
     width: 35% !important;
@@ -342,13 +344,18 @@
   @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
   .label { white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .card[data-state="done"] .track,
+  .card[data-state="duplicate"] .track,
   .card[data-state="error"] .track { display: none; }
+  .card[data-state="duplicate"] .label { color: var(--warn); }
   .card[data-state="done"] .label { color: var(--ok); }
   .card[data-state="error"] .label { color: var(--err); white-space: normal; }
   .card[data-state="retrying"] .label { color: var(--warn); }
   .card .act { display: none; }
   .card[data-state="done"] .act.reveal,
+  .card[data-state="duplicate"] .act.reveal,
+  .card[data-state="duplicate"] .act.again,
   .card[data-state="error"] .act.retry { display: inline-flex; }
+  .card .acts { display: flex; gap: 6px; }
 
   .empty {
     text-align: center;
@@ -359,6 +366,78 @@
   }
   .empty svg { width: 34px; height: 34px; color: var(--faint); margin-bottom: 8px; }
   .empty b { display: block; color: var(--text); font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+
+  /* ---------- Actualizacion ---------- */
+  .update {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: -8px 0 18px;
+    padding: 10px 10px 10px 16px;
+    border-radius: 14px;
+    border: 1px solid transparent;
+    background:
+      linear-gradient(var(--bg), var(--bg)) padding-box,
+      var(--accent) border-box;
+    font-size: 13px;
+    animation: enter 0.35s ease;
+  }
+  .update b { font-weight: 650; }
+  .update span { color: var(--muted); }
+  .update .btn { margin-left: auto; height: 32px; }
+
+  /* ---------- Recorte ---------- */
+  .btn.on { color: var(--text); border-color: var(--accent-2); background: rgba(155, 107, 255, 0.12); }
+  .trim {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px 12px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .trim input {
+    width: 82px;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    outline: 0;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  .trim input:focus { border-color: var(--accent-2); }
+  .trim input.bad { border-color: var(--err); animation: shake 0.3s; }
+  .trim .note { color: var(--faint); font-size: 12px; }
+  @keyframes shake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+
+  .chip {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: 6px;
+    background: rgba(155, 107, 255, 0.16);
+    color: var(--accent-2);
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: 1px;
+  }
+  @media (prefers-color-scheme: light) { .chip { color: #7444E0; } }
+
+  /* Caratula cuadrada dentro del recuadro 16:9, con fondo difuminado */
+  .thumb.cover::before {
+    content: "";
+    position: absolute;
+    inset: -12px;
+    background: var(--cover) center / cover;
+    filter: blur(12px) brightness(0.75);
+  }
+  .thumb.cover img { position: relative; object-fit: contain; }
 
   @media (max-width: 620px) {
     .app { padding: 20px 16px 32px; }
@@ -381,18 +460,28 @@
       </svg>
     </div>
     <div class="brand">
-      <h1>Sonora</h1>
-      <p>Audio de YouTube en la mejor calidad</p>
+      <h1>Sonora<span class="ver" id="ver"></span></h1>
+      <p>YouTube, SoundCloud, Mixcloud y Bandcamp en la mejor calidad</p>
     </div>
     <div class="engine" id="engine" data-state="installing" title="Motor de descargas (yt-dlp)">
       <span class="dot"></span><span class="txt" id="engine-txt">Preparando…</span>
     </div>
   </header>
 
+  <div class="update" id="update" hidden>
+    <div><b id="update-title">Nueva versión disponible</b> <span id="update-sub"></span></div>
+    <button class="btn primary" id="update-go">Actualizar</button>
+  </div>
+
   <section class="composer" id="composer">
     <textarea id="urls" rows="2" spellcheck="false" autofocus
-      placeholder="Pega uno o varios enlaces de YouTube…"></textarea>
+      placeholder="Pega enlaces de YouTube, SoundCloud, Mixcloud o Bandcamp…"></textarea>
     <div class="hint">Uno por línea o separados por espacios · <kbd id="kbd">⌘ ↩</kbd> para descargar</div>
+    <div class="trim" id="trim" hidden>
+      Desde <input id="trim-from" placeholder="0:00" inputmode="numeric">
+      hasta <input id="trim-to" placeholder="final" inputmode="numeric">
+      <span class="note">Ej. 1:20 · se aplica a los enlaces que agregues</span>
+    </div>
     <div class="bar">
       <div class="segmented" id="quality" role="radiogroup" aria-label="Calidad">
         <button data-q="flac" role="radio" title="Sin pérdida: la mejor pista de YouTube sin volver a comprimir. Archivos grandes."><b>FLAC</b><span>Sin pérdida</span></button>
@@ -402,6 +491,9 @@
       <button class="btn folder" id="folder" title="Carpeta de destino">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.6l2 2.2h7.4A2.5 2.5 0 0 1 21 9.7v7.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/></svg>
         <span class="path" id="folder-path">Música</span>
+      </button>
+      <button class="btn icon" id="cut" title="Recortar: descargar solo un fragmento">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg>
       </button>
       <button class="btn icon" id="import" title="Importar enlaces desde un .txt">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14l3 3 3-3"/></svg>
@@ -444,7 +536,10 @@
         <span class="label">En cola</span>
       </div>
     </div>
-    <div>
+    <div class="acts">
+      <button class="btn icon act again" title="Descargar de nuevo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+      </button>
       <button class="btn icon act reveal" title="Mostrar archivo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
       </button>
@@ -473,6 +568,36 @@ function videoId(url) {
   return m ? m[1] : null;
 }
 
+/** "1:20" -> 80, "1:02:03" -> 3723, "" -> null, invalido -> NaN */
+function parseTime(text) {
+  text = text.trim();
+  if (!text) return null;
+  if (!/^\d+(:\d{1,2}){0,2}$/.test(text)) return NaN;
+  return text.split(":").reduce((acc, n) => acc * 60 + Number(n), 0);
+}
+
+function clock(secs) {
+  const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
+  const mm = h ? String(m).padStart(2, "0") : m;
+  return (h ? `${h}:` : "") + `${mm}:${String(s).padStart(2, "0")}`;
+}
+
+/** Fragmento elegido, null si no se recorta, o false si los tiempos no son validos */
+function readSection() {
+  if ($("trim").hidden) return null;
+  const from = $("trim-from"), to = $("trim-to");
+  const start = parseTime(from.value) ?? 0, end = parseTime(to.value);
+  const badStart = Number.isNaN(start), badEnd = Number.isNaN(end) || (end !== null && end <= start);
+  from.classList.toggle("bad", badStart);
+  to.classList.toggle("bad", !badStart && badEnd);
+  if (badStart || badEnd) return false;
+  return start === 0 && end === null ? null : [start, end];
+}
+
+function sectionLabel(section) {
+  return section ? `${clock(section[0])}–${section[1] === null ? "final" : clock(section[1])}` : "";
+}
+
 function shortPath(path) {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.slice(-2).join("/") || path;
@@ -490,12 +615,20 @@ function refreshComposer() {
 }
 
 async function submit() {
-  const text = urlsEl.value;
-  if (!parseUrls(text).length || !api) return;
+  if (!api) return;
+  const section = readSection();
+  if (section === false) return;
+  // Lo que ya esta en la cola (y no fallo) no se vuelve a agregar
+  const keyOf = (url, sec) => url + "|" + sectionLabel(sec);
+  const queued = new Set(
+    [...jobs.values()].filter((j) => j.state !== "error").map((j) => keyOf(j.url, j.section))
+  );
+  const urls = parseUrls(urlsEl.value).filter((u) => !queued.has(keyOf(u, section)));
   urlsEl.value = "";
   refreshComposer();
-  const created = await api.add_urls(text);
-  created.forEach((job) => addCard(job));
+  if (!urls.length) return;
+  const created = await api.add_urls(urls.join("\n"), section);
+  created.forEach((job) => addCard(job, section));
 }
 
 function setQuality(q) {
@@ -532,9 +665,26 @@ $("import").addEventListener("click", async () => {
   urlsEl.focus();
 });
 $("open").addEventListener("click", () => api && api.open_folder());
+$("cut").addEventListener("click", () => {
+  const trim = $("trim");
+  trim.hidden = !trim.hidden;
+  $("cut").classList.toggle("on", !trim.hidden);
+  if (!trim.hidden) $("trim-from").focus();
+});
+["trim-from", "trim-to"].forEach((id) => {
+  $(id).addEventListener("input", () => $(id).classList.remove("bad"));
+  $(id).addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); submit(); }
+  });
+});
+$("update-go").addEventListener("click", () => {
+  $("update-go").disabled = true;
+  $("update-go").textContent = "Descargando…";
+  api.install_update();
+});
 $("clear").addEventListener("click", () => {
   for (const [id, job] of jobs) {
-    if (job.state === "done") { job.el.remove(); jobs.delete(id); }
+    if (job.state === "done" || job.state === "duplicate") { job.el.remove(); jobs.delete(id); }
   }
   refreshStats();
 });
@@ -551,9 +701,9 @@ window.addEventListener("drop", (e) => {
 });
 
 /* ---------- Cola ---------- */
-function addCard({ id, url }) {
+function addCard({ id, url }, section) {
   const el = $("card-tpl").content.firstElementChild.cloneNode(true);
-  const job = { id, url, el, state: "queued", quality };
+  const job = { id, url, el, state: "queued", quality, section };
   jobs.set(id, job);
 
   const vid = videoId(url);
@@ -561,8 +711,12 @@ function addCard({ id, url }) {
   img.addEventListener("load", () => img.classList.add("loaded"));
   if (vid) img.src = `https://i.ytimg.com/vi/${vid}/mqdefault.jpg`;
   el.querySelector(".title").textContent = url;
-  el.querySelector(".sub").textContent = QUALITY_NAMES[quality];
+  setSub(job, []);
   el.querySelector(".reveal").addEventListener("click", () => api.reveal(job.path));
+  el.querySelector(".again").addEventListener("click", () => {
+    setState(job, "queued", "En cola");
+    api.download_again(id);
+  });
   el.querySelector(".retry").addEventListener("click", () => {
     setState(job, "queued", "En cola");
     api.retry(id);
@@ -571,6 +725,28 @@ function addCard({ id, url }) {
   $("list").prepend(el);
   refreshStats();
 }
+
+function setSub(job, parts) {
+  const sub = job.el.querySelector(".sub");
+  sub.textContent = [...parts, QUALITY_NAMES[job.quality]].filter(Boolean).join(" · ");
+  if (job.section) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.textContent = "✂ " + sectionLabel(job.section);
+    sub.append(chip);
+  }
+}
+
+function showCover(job, url) {
+  const thumb = job.el.querySelector(".thumb");
+  const img = thumb.querySelector("img");
+  img.classList.remove("loaded");
+  img.src = url;
+  thumb.classList.add("cover");
+  thumb.style.setProperty("--cover", `url("${url}")`);
+}
+
+const SOURCES = { Soundcloud: "SoundCloud", Mixcloud: "Mixcloud", Bandcamp: "Bandcamp" };
 
 function setState(job, state, label) {
   job.state = state;
@@ -581,7 +757,7 @@ function setState(job, state, label) {
 
 function refreshStats() {
   const all = [...jobs.values()];
-  const done = all.filter((j) => j.state === "done").length;
+  const done = all.filter((j) => j.state === "done" || j.state === "duplicate").length;
   const failed = all.filter((j) => j.state === "error").length;
   $("empty").hidden = all.length > 0;
   $("clear").hidden = done === 0;
@@ -598,11 +774,14 @@ function onJobEvent(e) {
   if (e.meta) {
     const m = e.meta;
     const title = el.querySelector(".title");
-    title.textContent = m.fulltitle || job.url;
+    title.textContent = m.title || job.url;
     title.classList.remove("pending");
-    el.querySelector(".sub").textContent =
-      [m.uploader, QUALITY_NAMES[job.quality]].filter(Boolean).join(" · ");
-    el.querySelector(".badge").textContent = m.duration_string || "";
+    setSub(job, [SOURCES[m.extractor_key], m.uploader]);
+    if (m.duration) el.querySelector(".badge").textContent = clock(Math.round(m.duration));
+    if (!videoId(job.url) && m.thumbnail && !job.thumbSet) {
+      job.thumbSet = true;
+      el.querySelector("img").src = m.thumbnail;
+    }
   }
 
   switch (e.state) {
@@ -626,9 +805,23 @@ function onJobEvent(e) {
     case "retrying":
       setState(job, "retrying", "YouTube bloqueó la descarga · actualizando y reintentando…");
       break;
-    case "done":
+    case "tagging":
+      setState(job, "tagging", "Buscando carátula y datos…");
+      break;
+    case "done": {
       job.path = e.path;
-      setState(job, "done", "✓ Lista");
+      const info = e.info || {};
+      if (info.title) {
+        el.querySelector(".title").textContent = `${info.artist} – ${info.title}`;
+        setSub(job, [info.album, info.year]);
+      }
+      if (info.cover_url) showCover(job, info.cover_url);
+      setState(job, "done", e.count > 1 ? `✓ ${e.count} canciones` : "✓ Lista");
+      break;
+    }
+    case "duplicate":
+      job.path = e.path;
+      setState(job, "duplicate", "Ya está en tu biblioteca");
       break;
     case "error":
       setState(job, "error", e.message || "Error al descargar");
@@ -649,12 +842,30 @@ function onEngine(e) {
   pill.title = e.state === "error" ? e.message : "Motor de descargas (yt-dlp), se actualiza solo";
 }
 
-window.onEngineEvent = (e) => (e.type === "engine" ? onEngine(e) : onJobEvent(e));
+function onUpdate(e) {
+  const box = $("update");
+  if (e.state === "available") {
+    box.hidden = false;
+    $("update-title").textContent = `Sonora ${e.version} disponible`;
+    $("update-sub").textContent = e.installable
+      ? "· se instala y la app se vuelve a abrir"
+      : "· descárgala desde GitHub";
+    $("update-go").hidden = !e.installable;
+  } else if (e.state === "error") {
+    $("update-go").disabled = false;
+    $("update-go").textContent = "Reintentar";
+    $("update-sub").textContent = "· " + (e.message || "no se pudo actualizar");
+  }
+}
+
+window.onEngineEvent = (e) =>
+  e.type === "engine" ? onEngine(e) : e.type === "update" ? onUpdate(e) : onJobEvent(e);
 
 /* ---------- Arranque ---------- */
 async function start() {
   api = window.pywebview.api;
-  const { settings, platform } = await api.init();
+  const { settings, platform, version } = await api.init();
+  $("ver").textContent = version;
   setQuality(settings.quality);
   $("folder-path").textContent = shortPath(settings.out_dir);
   $("folder").title = settings.out_dir;

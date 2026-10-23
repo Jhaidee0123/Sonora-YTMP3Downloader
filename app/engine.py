@@ -17,11 +17,15 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
 
 import certifi
+
+import tagger
+from library import Library, url_key
 
 APP_NAME = "Sonora"
 IS_WIN = sys.platform == "win32"
@@ -62,6 +66,10 @@ QUALITIES = {
 }
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+META_FIELDS = (
+    ".{extractor_key,id,title,uploader,artist,track,album,release_year,"
+    "duration,thumbnail,webpage_url,playlist_index}"
+)
 URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 
 
@@ -155,6 +163,17 @@ def ensure_deno():
     return DENO_PATH
 
 
+def update_deno():
+    """Actualiza el Deno propio de la app una vez al mes (el del sistema no se toca)."""
+    if not DENO_PATH.exists() or time.time() - DENO_PATH.stat().st_mtime < 30 * 86400:
+        return
+    try:
+        _run([str(DENO_PATH), "upgrade", "--quiet"], timeout=300)
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    DENO_PATH.touch()
+
+
 def ytdlp_version():
     result = _run([str(YTDLP_PATH), "--version"], timeout=60)
     return result.stdout.strip() or None
@@ -213,6 +232,7 @@ class Engine:
         self.version = None
         self.ffmpeg_dir = None
         self.deno_path = None
+        self.library = Library(data_dir() / "library.json")
         self._update_lock = threading.Lock()
         self._procs = set()
 
@@ -225,6 +245,7 @@ class Engine:
             self.ffmpeg_dir = ensure_ffmpeg()
             self.deno_path = ensure_deno()
             self.version = update_ytdlp()
+            update_deno()
             self.emit({"type": "engine", "state": "ready", "version": self.version})
         except Exception as e:  # noqa: BLE001
             self.error = str(e)
@@ -244,39 +265,59 @@ class Engine:
         finally:
             self._update_lock.release()
 
-    def download(self, job_id, url, quality, out_dir):
+    def download(self, job_id, url, quality, out_dir, section=None, force=False):
         self.ready.wait()
         if self.error:
             self.emit({"type": "job", "id": job_id, "state": "error", "message": self.error})
             return
 
-        errors = self._run_download(job_id, url, quality, out_dir)
+        if not force:
+            existing = self.library.find(url_key(url), quality, section)
+            if existing:
+                self.emit({"type": "job", "id": job_id, "state": "duplicate", "path": existing})
+                return
+
+        args = (job_id, url, quality, out_dir, section, force)
+        errors = self._run_download(*args)
         if errors and any("403" in e or "Forbidden" in e for e in errors):
             # YouTube suele bloquear versiones viejas: actualizar y reintentar
             self.emit({"type": "job", "id": job_id, "state": "retrying"})
             self.force_update()
-            errors = self._run_download(job_id, url, quality, out_dir)
+            errors = self._run_download(*args)
         if errors:
             self.emit({"type": "job", "id": job_id, "state": "error", "message": errors[-1]})
 
-    def _run_download(self, job_id, url, quality, out_dir):
+    def _run_download(self, job_id, url, quality, out_dir, section, force):
         """Ejecuta yt-dlp. Devuelve la lista de errores ([] si todo salio bien)."""
-        Path(out_dir).mkdir(parents=True, exist_ok=True)
+        staging = data_dir() / "staging" / job_id
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir(parents=True)
+        try:
+            return self._download_to(staging, job_id, url, quality, out_dir, section, force)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+    def _download_to(self, staging, job_id, url, quality, out_dir, section, force):
         cmd = [
             str(YTDLP_PATH), url,
             "--no-playlist", "--newline", "--progress", "--no-colors",
             "--ffmpeg-location", str(self.ffmpeg_dir),
             "--js-runtimes", f"deno:{self.deno_path}",
             *QUALITIES.get(quality, QUALITIES["flac"]),
-            # "Artista - Cancion" en el titulo -> etiquetas separadas
-            "--parse-metadata", "title:%(artist)s - %(title)s",
-            "--embed-metadata", "--embed-thumbnail",
-            "-o", str(Path(out_dir) / "%(fulltitle)s.%(ext)s"),
-            "--print", "before_dl:META %(.{id,fulltitle,uploader,thumbnail,duration_string})j",
+            # La miniatura queda como respaldo si no aparece la caratula oficial
+            "--write-thumbnail", "--convert-thumbnails", "jpg",
+            "-o", str(staging / "%(id)s.%(ext)s"),
+            "--print", f"before_dl:META %({META_FIELDS})j",
             "--print", "after_move:FILE %(filepath)s",
             "--progress-template",
             "download:PROG %(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
         ]
+        if section:
+            end = section[1] if section[1] else "inf"
+            cmd += ["--download-sections", f"*{section[0]}-{end}", "--force-keyframes-at-cuts"]
+            # ffmpeg no puede recortar desde DASH (Mixcloud): preferir otro formato
+            fmt = cmd.index("-f") + 1
+            cmd[fmt] = f"bestaudio[protocol!*=dash]/{cmd[fmt]}"
         self.emit({"type": "job", "id": job_id, "state": "starting"})
 
         try:
@@ -289,7 +330,7 @@ class Engine:
             return [str(e)]
 
         self._procs.add(proc)
-        errors, filepath = [], None
+        errors, done, meta = [], [], None
         for raw in proc.stdout:
             line = ANSI_RE.sub("", raw).strip()
             if line.startswith("META "):
@@ -298,6 +339,14 @@ class Engine:
                 except ValueError:
                     continue
                 self.emit({"type": "job", "id": job_id, "state": "downloading", "meta": meta})
+                existing = None if force or meta.get("playlist_index") else self.library.find(
+                    f"{meta['extractor_key']}:{meta['id']}", quality, section)
+                if existing:
+                    proc.kill()
+                    proc.wait()
+                    self._procs.discard(proc)
+                    self.emit({"type": "job", "id": job_id, "state": "duplicate", "path": existing})
+                    return []
             elif line.startswith("PROG "):
                 pct, speed, eta = (line[5:].split("|") + ["", ""])[:3]
                 try:
@@ -310,17 +359,71 @@ class Engine:
                 })
                 if percent >= 100:
                     self.emit({"type": "job", "id": job_id, "state": "converting"})
-            elif line.startswith("FILE "):
-                filepath = line[5:]
+            elif line.startswith("FILE ") and meta:
+                done.append((meta, Path(line[5:])))
             elif line.startswith("ERROR:"):
                 errors.append(line[6:].strip())
 
         proc.wait()
         self._procs.discard(proc)
-        if proc.returncode == 0 and filepath:
-            self.emit({"type": "job", "id": job_id, "state": "done", "path": filepath})
-            return []
-        return errors or [f"yt-dlp terminó con código {proc.returncode}"]
+        if proc.returncode != 0 or not done:
+            return errors or [f"yt-dlp terminó con código {proc.returncode}"]
+
+        self.emit({"type": "job", "id": job_id, "state": "tagging"})
+        result = None
+        for item_meta, staged in done:
+            result = self._finish(item_meta, staged, url, quality, out_dir, section, force)
+        if len(done) == 1 and result["duplicate"]:
+            # Ya existia un archivo con ese nombre en la carpeta
+            self.emit({"type": "job", "id": job_id, "state": "duplicate", "path": result["path"]})
+        else:
+            self.emit({"type": "job", "id": job_id, "state": "done", "count": len(done), **result})
+        return []
+
+    def _finish(self, meta, staged, url, quality, out_dir, section, force):
+        """Etiqueta el archivo y lo mueve a la carpeta final con un nombre limpio."""
+        try:
+            info = tagger.resolve(meta)
+        except Exception:  # noqa: BLE001 - sin datos oficiales se usa lo adivinado
+            info = tagger.guess(meta)
+
+        cover = None
+        if info.get("cover_url"):
+            try:
+                cover = _fetch(info["cover_url"])
+            except Exception:  # noqa: BLE001
+                info.pop("cover_url")
+        thumb = staged.with_suffix(".jpg")
+        if cover is None and thumb.exists():
+            try:
+                cover = tagger.square_thumbnail(thumb, str(self.ffmpeg_dir / f"ffmpeg{EXE}"))
+            except (OSError, subprocess.CalledProcessError):
+                cover = None
+        try:
+            tagger.write_tags(staged, info, cover, meta.get("webpage_url") or url)
+        except Exception:  # noqa: BLE001 - un error de etiquetas no debe perder la cancion
+            pass
+
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dest = out_dir / tagger.filename(info, staged.suffix.lstrip("."), section)
+        duplicate = dest.exists() and not force
+        if duplicate:
+            staged.unlink()
+        else:
+            base, n = dest, 2
+            while dest.exists():
+                dest = base.with_name(f"{base.stem} ({n}){base.suffix}")
+                n += 1
+            shutil.move(str(staged), dest)
+
+        keys = {url_key(url), f"{meta['extractor_key']}:{meta['id']}"}
+        self.library.add(keys, quality, section, dest)
+        return {
+            "path": str(dest),
+            "duplicate": duplicate,
+            "info": {k: info.get(k) for k in ("artist", "title", "album", "year", "cover_url")},
+        }
 
     def shutdown(self):
         for proc in list(self._procs):

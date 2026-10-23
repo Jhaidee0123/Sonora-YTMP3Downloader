@@ -643,6 +643,38 @@
   .trim-msg.err { color: var(--err); }
   .loading { padding: 50px 0; text-align: center; color: var(--muted); }
 
+  /* Selector de canciones de un album o lista */
+  .pick-body { padding: 8px 10px; }
+  .pick-list { display: grid; gap: 2px; }
+  .pick-row {
+    display: grid;
+    grid-template-columns: 18px 20px 64px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 12px;
+    border-radius: 12px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .pick-list.no-thumbs .pick-row { grid-template-columns: 18px 20px 1fr auto; }
+  .pick-list.no-thumbs img { display: none; }
+  .pick-row:hover { background: var(--surface); }
+  .pick-row input { width: 16px; height: 16px; margin: 0; accent-color: #9B6BFF; cursor: pointer; }
+  .pick-row .n { color: var(--faint); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+  .pick-row img { width: 64px; height: 36px; border-radius: 6px; object-fit: cover; background: var(--thumb-bg); }
+  .pick-row .t { min-width: 0; }
+  .pick-row .t b {
+    display: block;
+    font-size: 13.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pick-row .t span { color: var(--muted); font-size: 12px; }
+  .pick-row .d { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .pick-row.off .t, .pick-row.off img, .pick-row.off .d { opacity: 0.4; }
+
   @media (max-width: 620px) {
     .app { padding: 20px 16px 32px; }
     .engine .txt { display: none; }
@@ -751,7 +783,8 @@
             <li>Pega uno o varios enlaces de <b>YouTube, YouTube Music, SoundCloud, Mixcloud o Bandcamp</b>, uno por línea, o arrástralos a la ventana.</li>
             <li>Toca <b>Descargar</b> o presiona <b class="kbd-label">⌘ ↩</b>. Se bajan hasta 3 a la vez.</li>
             <li>Con el botón del documento puedes <b>importar un .txt</b> lleno de enlaces.</li>
-            <li>Si el enlace es de un mix o lista (<b>&amp;list=…</b>) se baja solo esa canción. Los álbumes de Bandcamp y sets de SoundCloud se bajan completos.</li>
+            <li>Si pegas un <b>álbum o lista</b> (de YouTube, un set de SoundCloud o un álbum de Bandcamp) aparecen todas sus canciones para que <b>elijas cuáles bajar</b>. Las que ya tienes vienen sin marcar.</li>
+            <li>Los mix automáticos de YouTube (<b>&amp;list=RD…</b>) no terminan nunca: de esos se baja solo la canción del enlace.</li>
           </ul>
         </div>
       </section>
@@ -871,6 +904,34 @@
   </div>
 </div>
 
+<div class="scrim" id="picker" hidden>
+  <div class="modal" role="dialog" aria-labelledby="pick-title">
+    <div class="modal-head">
+      <img class="trim-cover" id="pick-cover" alt="">
+      <div class="trim-title">
+        <h3 id="pick-title">Leyendo la lista…</h3>
+        <p id="pick-sub"></p>
+      </div>
+      <button class="btn icon" id="pick-close" data-tip="Cerrar sin descargar" data-tip-align="end">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body pick-body">
+      <div class="loading" id="pick-loading"></div>
+      <div class="pick-list" id="pick-list" hidden></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="pick-all" hidden data-tip="Marcar o desmarcar todas las canciones" data-tip-align="start">Quitar todas</button>
+      <span class="trim-msg" id="pick-msg"></span>
+      <button class="btn" id="pick-cancel" style="margin-left:auto">Cancelar</button>
+      <button class="btn primary" id="pick-go" style="margin-left:0" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+        <span id="pick-go-txt">Descargar</span>
+      </button>
+    </div>
+  </div>
+</div>
+
 <template id="card-tpl">
   <div class="card" data-state="queued">
     <div class="thumb"><img alt=""><span class="badge"></span></div>
@@ -963,8 +1024,9 @@ async function submit(trim = false) {
   urlsEl.value = "";
   refreshComposer();
   if (!urls.length) return;
-  const created = await api.add_urls(urls.join("\n"), trim);
+  const { jobs: created, playlists } = await api.add_urls(urls.join("\n"), trim);
   created.forEach((job) => addCard(job, trim));
+  playlists.forEach(queuePicker);
 }
 
 function setQuality(q) {
@@ -1204,6 +1266,111 @@ function onUpdate(e) {
 window.onEngineEvent = (e) =>
   e.type === "engine" ? onEngine(e) : e.type === "update" ? onUpdate(e) : onJobEvent(e);
 
+/* ---------- Albumes y listas ---------- */
+const pickQueue = [];
+let picking = null; // { url, entries } de la lista abierta
+
+function queuePicker(url) {
+  pickQueue.push(url);
+  if (!picking) nextPicker();
+}
+
+function entryThumb(e) {
+  const vid = videoId(e.url);
+  return vid ? `https://i.ytimg.com/vi/${vid}/mqdefault.jpg` : e.thumbnail;
+}
+
+async function nextPicker() {
+  const url = pickQueue.shift();
+  picking = null;
+  if (!url) { $("picker").hidden = true; return; }
+  const p = (picking = { url, entries: [] });
+  $("pick-title").textContent = "Leyendo la lista…";
+  $("pick-sub").textContent = url;
+  $("pick-cover").hidden = true;
+  $("pick-loading").textContent = "Buscando las canciones…";
+  $("pick-loading").hidden = false;
+  $("pick-list").hidden = true;
+  $("pick-list").replaceChildren();
+  $("pick-all").hidden = true;
+  $("pick-msg").textContent = "";
+  $("pick-go").disabled = true;
+  $("pick-go-txt").textContent = "Descargar";
+  $("picker").hidden = false;
+
+  const data = await api.read_playlist(url);
+  if (picking !== p) return; // se cerro mientras cargaba
+  if (data.error || !data.entries.length) {
+    $("pick-title").textContent = "No se pudo abrir la lista";
+    $("pick-loading").textContent = data.error || "La lista está vacía o es privada.";
+    return;
+  }
+
+  p.entries = data.entries;
+  const n = p.entries.length;
+  $("pick-title").textContent = data.title || "Lista";
+  $("pick-sub").textContent = [`${n} ${n === 1 ? "canción" : "canciones"}`, data.uploader]
+    .filter(Boolean).join(" · ");
+  const cover = p.entries.map(entryThumb).find(Boolean);
+  if (cover) { $("pick-cover").src = cover; $("pick-cover").hidden = false; }
+
+  const list = $("pick-list");
+  list.classList.toggle("no-thumbs", !cover);
+  p.entries.forEach((e, i) => {
+    const row = document.createElement("label");
+    row.className = "pick-row";
+    row.innerHTML = '<input type="checkbox"><span class="n"></span><img alt="" loading="lazy">' +
+      '<span class="t"><b></b><span></span></span><span class="d"></span>';
+    e.box = row.querySelector("input");
+    e.box.checked = !e.have;
+    e.box.addEventListener("change", refreshPicker);
+    row.querySelector(".n").textContent = i + 1;
+    const thumb = entryThumb(e);
+    if (thumb) row.querySelector("img").src = thumb;
+    row.querySelector("b").textContent = e.title;
+    const sub = row.querySelector(".t span");
+    sub.textContent = e.uploader || "";
+    if (e.have) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = "Ya la tienes";
+      sub.append(chip);
+    }
+    row.querySelector(".d").textContent = e.duration ? clock(e.duration) : "";
+    list.append(row);
+  });
+  $("pick-loading").hidden = true;
+  list.hidden = false;
+  $("pick-all").hidden = false;
+  refreshPicker();
+}
+
+function refreshPicker() {
+  const entries = picking.entries;
+  const n = entries.filter((e) => e.box.checked).length;
+  entries.forEach((e) => e.box.closest(".pick-row").classList.toggle("off", !e.box.checked));
+  $("pick-go").disabled = n === 0;
+  $("pick-go-txt").textContent = n ? `Descargar ${n}` : "Descargar";
+  $("pick-msg").textContent = `${n} de ${entries.length} seleccionadas`;
+  $("pick-all").textContent = n === entries.length ? "Quitar todas" : "Marcar todas";
+}
+
+async function confirmPicker() {
+  const urls = picking.entries.filter((e) => e.box.checked).map((e) => e.url);
+  nextPicker();
+  const { jobs: created } = await api.add_urls(urls.join("\n"), false);
+  created.forEach((job) => addCard(job, false));
+}
+
+$("pick-go").addEventListener("click", confirmPicker);
+$("pick-close").addEventListener("click", nextPicker);
+$("pick-cancel").addEventListener("click", nextPicker);
+$("pick-all").addEventListener("click", () => {
+  const all = picking.entries.some((e) => !e.box.checked);
+  picking.entries.forEach((e) => (e.box.checked = all));
+  refreshPicker();
+});
+
 /* ---------- Guia ---------- */
 function openHelp() { $("help").hidden = false; }
 function closeHelp() {
@@ -1438,6 +1605,7 @@ window.addEventListener("resize", () => { if (tr && !$("trimmer").hidden) { draw
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (!$("trimmer").hidden) closeTrimmer();
+    else if (!$("picker").hidden) nextPicker();
     else if (!$("help").hidden) closeHelp();
   }
   const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName);

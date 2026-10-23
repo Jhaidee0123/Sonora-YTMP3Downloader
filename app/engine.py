@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -111,6 +112,21 @@ def parse_urls(text):
         if url not in seen:
             seen.append(url)
     return seen
+
+
+def is_playlist(url):
+    """Album o lista con varias canciones. Los mix de YouTube (list=RD...) los
+    arma YouTube solo y no terminan nunca: de esos se baja la cancion del enlace."""
+    parts = urllib.parse.urlsplit(url)
+    host = parts.netloc.lower()
+    if host.endswith(("youtube.com", "youtu.be")):
+        lists = urllib.parse.parse_qs(parts.query).get("list")
+        return bool(lists) and not lists[0].startswith("RD")
+    if host.endswith("soundcloud.com"):
+        return "/sets/" in parts.path
+    if host.endswith("bandcamp.com"):
+        return "/album/" in parts.path
+    return False
 
 
 def _env():
@@ -320,6 +336,38 @@ class Engine:
             self.emit({"type": "engine", "state": "ready", "version": self.version})
         finally:
             self._update_lock.release()
+
+    def list_playlist(self, url, quality):
+        """Canciones de un album o lista, sin descargarlas, para elegir cuales bajar."""
+        self.ready.wait()
+        if self.error:
+            raise RuntimeError(self.error)
+        # En modo rapido SoundCloud no da los titulos: ahi se lee cada cancion
+        flat = [] if "soundcloud.com" in url else ["--flat-playlist"]
+        proc = _run([
+            str(YTDLP_PATH), url, "--yes-playlist", *flat, "-J",
+            "--js-runtimes", f"deno:{self.deno_path}",
+        ], timeout=300)
+        if proc.returncode != 0:
+            errors = [l[6:].strip() for l in proc.stderr.splitlines() if l.startswith("ERROR:")]
+            raise RuntimeError(errors[-1] if errors else f"yt-dlp terminó con código {proc.returncode}")
+        data = json.loads(proc.stdout)
+        entries = []
+        for entry in data.get("entries") or [data]:
+            link = entry and (entry.get("webpage_url") or entry.get("url"))
+            title = entry and entry.get("title")
+            if not link or not title or title in ("[Private video]", "[Deleted video]"):
+                continue
+            thumbs = entry.get("thumbnails") or []
+            entries.append({
+                "url": link,
+                "title": title,
+                "uploader": entry.get("uploader") or entry.get("channel"),
+                "duration": entry.get("duration"),
+                "thumbnail": entry.get("thumbnail") or (thumbs[-1]["url"] if thumbs else None),
+                "have": bool(self.library.find(url_key(link), quality, None)),
+            })
+        return {"title": data.get("title"), "uploader": data.get("uploader"), "entries": entries}
 
     def download(self, job_id, url, quality, out_dir, force=False, trim=False):
         """Descarga una URL. Con `trim` la cancion completa queda aparte, lista

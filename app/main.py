@@ -19,7 +19,7 @@ import webview
 
 import trimmer
 import updater
-from engine import APP_NAME, IS_MAC, IS_WIN, QUALITIES, Engine, data_dir, parse_urls
+from engine import APP_NAME, IS_MAC, IS_WIN, QUALITIES, Engine, data_dir, is_playlist, parse_urls
 from version import __version__
 
 SETTINGS_PATH = data_dir() / "settings.json"
@@ -71,14 +71,26 @@ class Api:
         return {"settings": self._settings, "platform": sys.platform, "version": __version__}
 
     def add_urls(self, text, trim=False):
-        """Con `trim` se descarga completa y se abre el editor para recortarla."""
-        jobs = []
+        """Con `trim` se descarga completa y se abre el editor para recortarla.
+
+        Los albumes y listas no se descargan aun: se devuelven para que la
+        interfaz muestre sus canciones y se elija cuales bajar."""
+        jobs, playlists = [], []
         for url in parse_urls(text):
+            if not trim and is_playlist(url):
+                playlists.append(url)
+                continue
             job_id = uuid.uuid4().hex[:8]
             self._jobs[job_id] = {"url": url, "trim": bool(trim)}
             jobs.append({"id": job_id, "url": url})
             self._submit(job_id)
-        return jobs
+        return {"jobs": jobs, "playlists": playlists}
+
+    def read_playlist(self, url):
+        try:
+            return self._engine.list_playlist(url, self._settings["quality"])
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"No se pudo leer la lista: {e}"}
 
     def retry(self, job_id):
         if job_id in self._jobs:

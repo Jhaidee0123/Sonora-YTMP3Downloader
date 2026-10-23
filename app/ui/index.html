@@ -24,6 +24,11 @@
     --glow-2: rgba(155, 107, 255, 0.20);
     --shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.6);
     --thumb-bg: #1A1A26;
+    --tip-bg: #ECECF4;
+    --tip-text: #14131C;
+    --scrim: rgba(5, 5, 10, 0.62);
+    --modal-bg: #14141D;
+    --dim: rgba(8, 8, 14, 0.62);
     color-scheme: dark;
   }
   @media (prefers-color-scheme: light) {
@@ -40,6 +45,11 @@
       --glow-2: rgba(155, 107, 255, 0.16);
       --shadow: 0 20px 50px -24px rgba(40, 30, 90, 0.25);
       --thumb-bg: #E9E7F2;
+      --tip-bg: #1E1D2A;
+      --tip-text: #FFFFFF;
+      --scrim: rgba(30, 25, 60, 0.28);
+      --modal-bg: #FFFFFF;
+      --dim: rgba(245, 244, 250, 0.72);
       color-scheme: light;
     }
   }
@@ -347,6 +357,8 @@
   .card[data-state="duplicate"] .track,
   .card[data-state="error"] .track { display: none; }
   .card[data-state="duplicate"] .label { color: var(--warn); }
+  .card[data-state="trim_ready"] .track { display: none; }
+  .card[data-state="trim_ready"] .label { color: var(--accent-2); font-weight: 600; }
   .card[data-state="done"] .label { color: var(--ok); }
   .card[data-state="error"] .label { color: var(--err); white-space: normal; }
   .card[data-state="retrying"] .label { color: var(--warn); }
@@ -354,6 +366,9 @@
   .card[data-state="done"] .act.reveal,
   .card[data-state="duplicate"] .act.reveal,
   .card[data-state="duplicate"] .act.again,
+  .card[data-state="done"]:not(.multi) .act.cut,
+  .card[data-state="duplicate"] .act.cut,
+  .card[data-state="trim_ready"] .act.cut,
   .card[data-state="error"] .act.retry { display: inline-flex; }
   .card .acts { display: flex; gap: 6px; }
 
@@ -388,33 +403,9 @@
 
   /* ---------- Recorte ---------- */
   .btn.on { color: var(--text); border-color: var(--accent-2); background: rgba(155, 107, 255, 0.12); }
-  .trim {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 16px 12px;
-    border-top: 1px solid var(--border);
-    color: var(--muted);
-    font-size: 13px;
-  }
-  .trim input {
-    width: 82px;
-    height: 32px;
-    padding: 0 10px;
-    border-radius: 9px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text);
-    font: inherit;
-    font-variant-numeric: tabular-nums;
-    outline: 0;
-    user-select: text;
-    -webkit-user-select: text;
-  }
-  .trim input:focus { border-color: var(--accent-2); }
-  .trim input.bad { border-color: var(--err); animation: shake 0.3s; }
-  .trim .note { color: var(--faint); font-size: 12px; }
-  @keyframes shake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+  .btn.cut-go { height: 42px; margin-left: auto; }
+  .btn.cut-go + .btn.primary { margin-left: 0; }
+  .btn.cut-go:disabled { opacity: 0.4; cursor: default; }
 
   .chip {
     display: inline-block;
@@ -439,9 +430,224 @@
   }
   .thumb.cover img { position: relative; object-fit: contain; }
 
+  /* ---------- Tooltips ---------- */
+  [data-tip] { position: relative; --tx: -50%; }
+  [data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 9px);
+    transform: translate(var(--tx), 4px);
+    width: max-content;
+    max-width: 250px;
+    padding: 7px 10px;
+    border-radius: 9px;
+    background: var(--tip-bg);
+    color: var(--tip-text);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.4;
+    text-align: left;
+    white-space: normal;
+    letter-spacing: 0;
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s, transform 0.15s;
+    z-index: 60;
+  }
+  [data-tip]:hover::after {
+    opacity: 1;
+    transform: translate(var(--tx), 0);
+    transition-delay: 0.4s;
+  }
+  [data-tip-pos="bottom"]::after { bottom: auto; top: calc(100% + 9px); transform: translate(var(--tx), -4px); }
+  [data-tip-align="start"] { --tx: 0; }
+  [data-tip-align="start"]::after { left: 0; }
+  [data-tip-align="end"] { --tx: 0; }
+  [data-tip-align="end"]::after { left: auto; right: 0; }
+  [data-tip]:disabled::after { display: none; }
+
+  .help-btn { margin-left: auto; height: 32px; border-radius: 999px; font-size: 12.5px; }
+  .help-btn + .engine { margin-left: 0; }
+
+  /* ---------- Modales ---------- */
+  .scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: var(--scrim);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    animation: fade 0.2s ease;
+  }
+  @keyframes fade { from { opacity: 0; } }
+  .modal {
+    width: min(720px, 100%);
+    max-height: calc(100vh - 40px);
+    display: flex;
+    flex-direction: column;
+    border-radius: 20px;
+    border: 1px solid var(--border-strong);
+    background: var(--modal-bg);
+    box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.6);
+    animation: enter 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .modal-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 18px 14px 22px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-head h3 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+  .modal-head p { margin: 1px 0 0; color: var(--muted); font-size: 12.5px; }
+  .modal-head .btn.icon { margin-left: auto; flex: none; }
+  .modal-body { padding: 18px 22px; overflow-y: auto; }
+  .modal-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 18px;
+    border-top: 1px solid var(--border);
+  }
+
+  /* Guia */
+  .guide { display: grid; gap: 14px; }
+  .guide section {
+    display: grid;
+    grid-template-columns: 34px 1fr;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+  }
+  .guide .gi {
+    width: 34px; height: 34px;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    background: var(--accent);
+    color: #fff;
+  }
+  .guide .gi svg { width: 18px; height: 18px; }
+  .guide h4 { margin: 0 0 4px; font-size: 14px; font-weight: 650; }
+  .guide p, .guide li { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .guide ul { margin: 4px 0 0; padding-left: 18px; }
+  .guide li + li { margin-top: 3px; }
+  .guide b { color: var(--text); font-weight: 600; }
+
+  /* Editor de recorte */
+  .trim-cover { width: 44px; height: 44px; border-radius: 10px; object-fit: cover; background: var(--thumb-bg); flex: none; }
+  .trim-title { min-width: 0; }
+  .trim-title h3 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .strip {
+    position: relative;
+    height: 96px;
+    margin: 6px 0 0;
+    border-radius: 12px;
+    background: var(--surface);
+    touch-action: none;
+    cursor: pointer;
+  }
+  .strip canvas { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 12px; }
+  .dim { position: absolute; top: 0; bottom: 0; background: var(--dim); pointer-events: none; }
+  .dim.l { left: 0; border-radius: 12px 0 0 12px; }
+  .dim.r { right: 0; border-radius: 0 12px 12px 0; }
+  .frame {
+    position: absolute;
+    top: -3px; bottom: -3px;
+    border-top: 3px solid var(--accent-1);
+    border-bottom: 3px solid var(--accent-2);
+    border-radius: 10px;
+    cursor: grab;
+  }
+  .frame:active { cursor: grabbing; }
+  .handle {
+    position: absolute;
+    top: -3px; bottom: -3px;
+    width: 18px;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    cursor: ew-resize;
+  }
+  .handle.l { left: -18px; border-radius: 10px 0 0 10px; background: var(--accent-1); }
+  .handle.r { right: -18px; border-radius: 0 10px 10px 0; background: var(--accent-2); }
+  .handle svg { width: 12px; height: 12px; }
+  .playhead {
+    position: absolute;
+    top: -6px; bottom: -6px;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 2px;
+    background: var(--text);
+    box-shadow: 0 0 0 1px var(--bg);
+    pointer-events: none;
+  }
+  .ruler {
+    display: flex;
+    justify-content: space-between;
+    margin: 8px 18px 0;
+    color: var(--faint);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .strip-wrap { padding: 0 18px; }
+  .trim-ctrls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+  }
+  .play {
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    border: 0;
+    display: grid;
+    place-items: center;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    box-shadow: 0 10px 24px -10px var(--accent-1);
+    flex: none;
+  }
+  .play svg { width: 18px; height: 18px; }
+  .tfield { display: grid; gap: 2px; font-size: 11px; color: var(--muted); }
+  .tfield input {
+    width: 92px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    outline: 0;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  .tfield input:focus { border-color: var(--accent-2); }
+  .tlen { margin-left: auto; text-align: right; }
+  .tlen b { display: block; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .tlen span { color: var(--muted); font-size: 11px; }
+  .trim-note { margin: 14px 0 0; color: var(--faint); font-size: 12px; }
+  .trim-msg { color: var(--muted); font-size: 12.5px; }
+  .trim-msg.err { color: var(--err); }
+  .loading { padding: 50px 0; text-align: center; color: var(--muted); }
+
   @media (max-width: 620px) {
     .app { padding: 20px 16px 32px; }
     .engine .txt { display: none; }
+    .help-btn span { display: none; }
+    .help-btn { width: 32px; padding: 0; justify-content: center; }
     .btn.folder .path { display: none; }
     .card { grid-template-columns: 84px 1fr auto; gap: 10px; }
     .thumb { width: 84px; }
@@ -461,9 +667,13 @@
     </div>
     <div class="brand">
       <h1>Sonora<span class="ver" id="ver"></span></h1>
-      <p>YouTube, SoundCloud, Mixcloud y Bandcamp en la mejor calidad</p>
+      <p>Tu música, en la mejor calidad</p>
     </div>
-    <div class="engine" id="engine" data-state="installing" title="Motor de descargas (yt-dlp)">
+    <button class="btn help-btn" id="help-open" data-tip="Guía rápida de todo lo que puede hacer Sonora" data-tip-pos="bottom">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6M12 17h.01"/></svg>
+      <span>Cómo usar Sonora</span>
+    </button>
+    <div class="engine" id="engine" data-state="installing" data-tip="Motor de descargas (yt-dlp). Se actualiza solo cada vez que abres la app" data-tip-pos="bottom" data-tip-align="end">
       <span class="dot"></span><span class="txt" id="engine-txt">Preparando…</span>
     </div>
   </header>
@@ -477,28 +687,24 @@
     <textarea id="urls" rows="2" spellcheck="false" autofocus
       placeholder="Pega enlaces de YouTube, SoundCloud, Mixcloud o Bandcamp…"></textarea>
     <div class="hint">Uno por línea o separados por espacios · <kbd id="kbd">⌘ ↩</kbd> para descargar</div>
-    <div class="trim" id="trim" hidden>
-      Desde <input id="trim-from" placeholder="0:00" inputmode="numeric">
-      hasta <input id="trim-to" placeholder="final" inputmode="numeric">
-      <span class="note">Ej. 1:20 · se aplica a los enlaces que agregues</span>
-    </div>
     <div class="bar">
       <div class="segmented" id="quality" role="radiogroup" aria-label="Calidad">
-        <button data-q="flac" role="radio" title="Sin pérdida: la mejor pista de YouTube sin volver a comprimir. Archivos grandes."><b>FLAC</b><span>Sin pérdida</span></button>
-        <button data-q="mp3" role="radio" title="MP3 a 320 kbps: compatible con todo."><b>MP3</b><span>320 kbps</span></button>
-        <button data-q="m4a" role="radio" title="AAC tal cual lo entrega YouTube, sin recodificar."><b>M4A</b><span>Original</span></button>
+        <button data-q="flac" role="radio" data-tip="Sin pérdida: guarda el audio de YouTube sin volver a comprimirlo. Ideal para rekordbox y Serato. Archivos grandes (~50 MB)" data-tip-align="start"><b>FLAC</b><span>Sin pérdida</span></button>
+        <button data-q="mp3" role="radio" data-tip="MP3 a 320 kbps: funciona en cualquier reproductor o equipo (~10 MB)"><b>MP3</b><span>320 kbps</span></button>
+        <button data-q="m4a" role="radio" data-tip="AAC tal como lo entrega la plataforma, sin recodificar. El más liviano (~4 MB)"><b>M4A</b><span>Original</span></button>
       </div>
-      <button class="btn folder" id="folder" title="Carpeta de destino">
+      <button class="btn folder" id="folder" data-tip="Carpeta donde se guardan las canciones. Toca para cambiarla">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.6l2 2.2h7.4A2.5 2.5 0 0 1 21 9.7v7.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/></svg>
         <span class="path" id="folder-path">Música</span>
       </button>
-      <button class="btn icon" id="cut" title="Recortar: descargar solo un fragmento">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg>
-      </button>
-      <button class="btn icon" id="import" title="Importar enlaces desde un .txt">
+      <button class="btn icon" id="import" data-tip="Importar enlaces desde un archivo .txt (uno por línea)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14l3 3 3-3"/></svg>
       </button>
-      <button class="btn primary" id="go" disabled>
+      <button class="btn cut-go" id="cut" disabled data-tip="Descarga la canción completa y abre el editor para elegir el fragmento que quieres guardar" data-tip-align="end">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg>
+        Recortar
+      </button>
+      <button class="btn primary" id="go" disabled data-tip="Descarga las canciones completas en tu carpeta" data-tip-align="end">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
         <span id="go-txt">Descargar</span>
       </button>
@@ -509,8 +715,8 @@
     <h2>Descargas</h2>
     <span class="stats" id="stats"></span>
     <div class="actions">
-      <button class="btn" id="clear" hidden>Limpiar completadas</button>
-      <button class="btn" id="open">
+      <button class="btn" id="clear" hidden data-tip="Quita de la lista las descargas terminadas (los archivos no se borran)">Limpiar completadas</button>
+      <button class="btn" id="open" data-tip="Abre tu carpeta de música" data-tip-align="end">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>
         Abrir carpeta
       </button>
@@ -522,6 +728,146 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
     <b>Aún no hay descargas</b>
     Pega enlaces arriba o arrástralos a la ventana
+  </div>
+</div>
+
+<div class="scrim" id="help" hidden>
+  <div class="modal" role="dialog" aria-labelledby="help-title">
+    <div class="modal-head">
+      <div>
+        <h3 id="help-title">Cómo usar Sonora</h3>
+        <p>Todo lo que puede hacer la app, en un minuto</p>
+      </div>
+      <button class="btn icon" id="help-close" data-tip="Cerrar" data-tip-align="end">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body guide">
+      <section>
+        <div class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></div>
+        <div>
+          <h4>Descargar canciones</h4>
+          <ul>
+            <li>Pega uno o varios enlaces de <b>YouTube, YouTube Music, SoundCloud, Mixcloud o Bandcamp</b>, uno por línea, o arrástralos a la ventana.</li>
+            <li>Toca <b>Descargar</b> o presiona <b class="kbd-label">⌘ ↩</b>. Se bajan hasta 3 a la vez.</li>
+            <li>Con el botón del documento puedes <b>importar un .txt</b> lleno de enlaces.</li>
+            <li>Si el enlace es de un mix o lista (<b>&amp;list=…</b>) se baja solo esa canción. Los álbumes de Bandcamp y sets de SoundCloud se bajan completos.</li>
+          </ul>
+        </div>
+      </section>
+      <section>
+        <div class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4"/></svg></div>
+        <div>
+          <h4>Elegir la calidad</h4>
+          <ul>
+            <li><b>FLAC · Sin pérdida</b>: guarda el audio tal como sale de la plataforma, sin volver a comprimirlo. Lo mejor para rekordbox y Serato. Archivos de ~50 MB.</li>
+            <li><b>MP3 · 320 kbps</b>: funciona en cualquier reproductor, equipo o carro. ~10 MB.</li>
+            <li><b>M4A · Original</b>: el AAC de la plataforma sin recodificar. El más liviano.</li>
+            <li>YouTube no tiene audio sin pérdida: FLAC no mejora el original, pero evita perder más calidad.</li>
+          </ul>
+        </div>
+      </section>
+      <section>
+        <div class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg></div>
+        <div>
+          <h4>Recortar un fragmento</h4>
+          <ul>
+            <li>Pega el enlace y toca <b>✂ Recortar</b>: la canción se descarga completa y se abre el editor.</li>
+            <li><b>Arrastra los bordes</b> del marco para elegir inicio y fin, o <b>arrastra el marco</b> para moverlo. Toca la onda para escuchar desde ese punto.</li>
+            <li><b>▶</b> o la barra <b>Espacio</b> reproduce el fragmento. También puedes escribir los tiempos exactos (ej. 1:20.5).</li>
+            <li>Se guarda como <b>"Artista - Canción [1m20s-1m50s]"</b> con la misma calidad y carátula. Puedes sacar varios recortes de la misma canción.</li>
+            <li>En las canciones ya descargadas, el botón <b>✂</b> de la tarjeta abre el mismo editor.</li>
+          </ul>
+        </div>
+      </section>
+      <section>
+        <div class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg></div>
+        <div>
+          <h4>Nombres limpios y carátulas</h4>
+          <ul>
+            <li>Quita el ruido del título ("(Video Oficial)", "| Letra", "[NEW]") y separa artista y canción: <b>"Fuerza Regida &amp; Grupo Frontera - Coqueta"</b>.</li>
+            <li>Busca la <b>carátula oficial</b>, el álbum, el año y el género. Si no la encuentra con seguridad, usa la imagen del video recortada a cuadrado.</li>
+            <li>Todo queda guardado dentro del archivo, así rekordbox, Serato o tu celular lo muestran.</li>
+          </ul>
+        </div>
+      </section>
+      <section>
+        <div class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+        <div>
+          <h4>Sin descargas repetidas</h4>
+          <ul>
+            <li>Si una canción ya está en tu carpeta, la tarjeta dice <b>"Ya está en tu biblioteca"</b>. Con <b>⤓</b> la descargas igual.</li>
+            <li>Si borras el archivo, se puede volver a bajar. FLAC y MP3 de la misma canción cuentan por separado.</li>
+          </ul>
+        </div>
+      </section>
+      <section>
+        <div class="gi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.5 6.2L3 16M3 21v-5h5"/></svg></div>
+        <div>
+          <h4>Siempre al día</h4>
+          <ul>
+            <li>El <b>punto verde</b> de arriba indica que el motor está listo. Se actualiza solo cada vez que abres la app.</li>
+            <li>Si YouTube bloquea una descarga, Sonora se actualiza y la reintenta sola.</li>
+            <li>Cuando sale una versión nueva de Sonora aparece un aviso: toca <b>Actualizar</b> y la app se reinstala y se vuelve a abrir.</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+    <div class="modal-foot">
+      <span class="trim-msg" id="help-ver"></span>
+      <button class="btn primary" id="help-ok">Entendido</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="trimmer" hidden>
+  <div class="modal" role="dialog" aria-labelledby="trim-name">
+    <div class="modal-head">
+      <img class="trim-cover" id="trim-cover" alt="">
+      <div class="trim-title">
+        <h3 id="trim-name">Recortar</h3>
+        <p>Arrastra los bordes para elegir el fragmento</p>
+      </div>
+      <button class="btn icon" id="trim-close" data-tip="Cerrar sin guardar" data-tip-align="end">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="loading" id="trim-loading">Cargando la canción…</div>
+      <div id="trim-ui" hidden>
+        <div class="strip-wrap">
+          <div class="strip" id="strip">
+            <canvas id="wave"></canvas>
+            <div class="dim l" id="dim-l"></div>
+            <div class="dim r" id="dim-r"></div>
+            <div class="frame" id="frame">
+              <div class="handle l" id="handle-l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></div>
+              <div class="handle r" id="handle-r"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></div>
+            </div>
+            <div class="playhead" id="playhead"></div>
+          </div>
+        </div>
+        <div class="ruler"><span>0:00</span><span id="ruler-mid"></span><span id="ruler-end"></span></div>
+        <div class="trim-ctrls">
+          <button class="play" id="play" data-tip="Escuchar el fragmento (Espacio)" data-tip-align="start">
+            <svg id="play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
+          </button>
+          <button class="btn" id="play-end" data-tip="Escuchar los últimos 3 segundos del fragmento, para revisar el corte final">Oír el final</button>
+          <label class="tfield">Inicio<input id="t-start" inputmode="decimal"></label>
+          <label class="tfield">Fin<input id="t-end" inputmode="decimal"></label>
+          <div class="tlen"><b id="t-len">0:00</b><span>duración del recorte</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="trim-full" hidden data-tip="Guarda también la canción completa en tu carpeta" data-tip-align="start">Guardar completa</button>
+      <span class="trim-msg" id="trim-msg"></span>
+      <button class="btn" id="trim-cancel" style="margin-left:auto">Cancelar</button>
+      <button class="btn primary" id="trim-save" style="margin-left:0" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg>
+        Guardar recorte
+      </button>
+    </div>
   </div>
 </div>
 
@@ -537,13 +883,16 @@
       </div>
     </div>
     <div class="acts">
-      <button class="btn icon act again" title="Descargar de nuevo">
+      <button class="btn icon act cut" data-tip="Recortar un fragmento de esta canción" data-tip-align="end">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg>
+      </button>
+      <button class="btn icon act again" data-tip="Descargarla de nuevo aunque ya la tengas" data-tip-align="end">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
       </button>
-      <button class="btn icon act reveal" title="Mostrar archivo">
+      <button class="btn icon act reveal" data-tip="Mostrar el archivo en la carpeta" data-tip-align="end">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
       </button>
-      <button class="btn icon act retry" title="Reintentar">
+      <button class="btn icon act retry" data-tip="Reintentar la descarga" data-tip-align="end">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8M21 3v5h-5M21 12a9 9 0 0 1-15.5 6.2L3 16M3 21v-5h5"/></svg>
       </button>
     </div>
@@ -568,34 +917,22 @@ function videoId(url) {
   return m ? m[1] : null;
 }
 
-/** "1:20" -> 80, "1:02:03" -> 3723, "" -> null, invalido -> NaN */
+/** "1:20" -> 80, "1:20.5" -> 80.5, "95" -> 95, invalido -> NaN */
 function parseTime(text) {
-  text = text.trim();
-  if (!text) return null;
-  if (!/^\d+(:\d{1,2}){0,2}$/.test(text)) return NaN;
+  text = text.trim().replace(",", ".");
+  if (!/^\d+(\.\d+)?$|^\d+(:\d{1,2}){1,2}(\.\d+)?$/.test(text)) return NaN;
   return text.split(":").reduce((acc, n) => acc * 60 + Number(n), 0);
 }
 
-function clock(secs) {
-  const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
-  const mm = h ? String(m).padStart(2, "0") : m;
-  return (h ? `${h}:` : "") + `${mm}:${String(s).padStart(2, "0")}`;
-}
-
-/** Fragmento elegido, null si no se recorta, o false si los tiempos no son validos */
-function readSection() {
-  if ($("trim").hidden) return null;
-  const from = $("trim-from"), to = $("trim-to");
-  const start = parseTime(from.value) ?? 0, end = parseTime(to.value);
-  const badStart = Number.isNaN(start), badEnd = Number.isNaN(end) || (end !== null && end <= start);
-  from.classList.toggle("bad", badStart);
-  to.classList.toggle("bad", !badStart && badEnd);
-  if (badStart || badEnd) return false;
-  return start === 0 && end === null ? null : [start, end];
-}
-
-function sectionLabel(section) {
-  return section ? `${clock(section[0])}–${section[1] === null ? "final" : clock(section[1])}` : "";
+function clock(secs, decimals = 0) {
+  const f = 10 ** decimals;
+  const total = decimals ? Math.round(Math.max(0, secs) * f) / f : Math.floor(Math.max(0, secs));
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60);
+  let s = (total % 60).toFixed(decimals);
+  if (decimals === 0) s = String(Math.floor(total % 60));
+  const [si, sd] = s.split(".");
+  const ss = si.padStart(2, "0") + (sd ? "." + sd : "");
+  return (h ? `${h}:${String(m).padStart(2, "0")}` : `${m}`) + `:${ss}`;
 }
 
 function shortPath(path) {
@@ -609,26 +946,25 @@ const urlsEl = $("urls");
 function refreshComposer() {
   const n = parseUrls(urlsEl.value).length;
   $("go").disabled = n === 0;
+  $("cut").disabled = n === 0;
   $("go-txt").textContent = n > 1 ? `Descargar ${n}` : "Descargar";
   urlsEl.style.height = "auto";
   urlsEl.style.height = Math.min(urlsEl.scrollHeight, 180) + "px";
 }
 
-async function submit() {
+async function submit(trim = false) {
   if (!api) return;
-  const section = readSection();
-  if (section === false) return;
   // Lo que ya esta en la cola (y no fallo) no se vuelve a agregar
-  const keyOf = (url, sec) => url + "|" + sectionLabel(sec);
+  const keyOf = (url, t) => url + "|" + t;
   const queued = new Set(
-    [...jobs.values()].filter((j) => j.state !== "error").map((j) => keyOf(j.url, j.section))
+    [...jobs.values()].filter((j) => j.state !== "error").map((j) => keyOf(j.url, j.trim))
   );
-  const urls = parseUrls(urlsEl.value).filter((u) => !queued.has(keyOf(u, section)));
+  const urls = parseUrls(urlsEl.value).filter((u) => !queued.has(keyOf(u, trim)));
   urlsEl.value = "";
   refreshComposer();
   if (!urls.length) return;
-  const created = await api.add_urls(urls.join("\n"), section);
-  created.forEach((job) => addCard(job, section));
+  const created = await api.add_urls(urls.join("\n"), trim);
+  created.forEach((job) => addCard(job, trim));
 }
 
 function setQuality(q) {
@@ -644,7 +980,8 @@ urlsEl.addEventListener("input", refreshComposer);
 urlsEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit(); }
 });
-$("go").addEventListener("click", submit);
+$("go").addEventListener("click", () => submit());
+$("cut").addEventListener("click", () => submit(true));
 $("quality").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
@@ -665,18 +1002,6 @@ $("import").addEventListener("click", async () => {
   urlsEl.focus();
 });
 $("open").addEventListener("click", () => api && api.open_folder());
-$("cut").addEventListener("click", () => {
-  const trim = $("trim");
-  trim.hidden = !trim.hidden;
-  $("cut").classList.toggle("on", !trim.hidden);
-  if (!trim.hidden) $("trim-from").focus();
-});
-["trim-from", "trim-to"].forEach((id) => {
-  $(id).addEventListener("input", () => $(id).classList.remove("bad"));
-  $(id).addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); submit(); }
-  });
-});
 $("update-go").addEventListener("click", () => {
   $("update-go").disabled = true;
   $("update-go").textContent = "Descargando…";
@@ -701,9 +1026,9 @@ window.addEventListener("drop", (e) => {
 });
 
 /* ---------- Cola ---------- */
-function addCard({ id, url }, section) {
+function addCard({ id, url }, trim) {
   const el = $("card-tpl").content.firstElementChild.cloneNode(true);
-  const job = { id, url, el, state: "queued", quality, section };
+  const job = { id, url, el, state: "queued", quality, trim };
   jobs.set(id, job);
 
   const vid = videoId(url);
@@ -713,6 +1038,7 @@ function addCard({ id, url }, section) {
   el.querySelector(".title").textContent = url;
   setSub(job, []);
   el.querySelector(".reveal").addEventListener("click", () => api.reveal(job.path));
+  el.querySelector(".cut").addEventListener("click", () => openTrimmer(job));
   el.querySelector(".again").addEventListener("click", () => {
     setState(job, "queued", "En cola");
     api.download_again(id);
@@ -729,12 +1055,19 @@ function addCard({ id, url }, section) {
 function setSub(job, parts) {
   const sub = job.el.querySelector(".sub");
   sub.textContent = [...parts, QUALITY_NAMES[job.quality]].filter(Boolean).join(" · ");
-  if (job.section) {
+  if (job.trim) {
     const chip = document.createElement("span");
     chip.className = "chip";
-    chip.textContent = "✂ " + sectionLabel(job.section);
+    chip.textContent = "✂ recorte";
     sub.append(chip);
   }
+}
+
+function showInfo(job, info) {
+  const title = job.el.querySelector(".title");
+  title.textContent = `${info.artist} – ${info.title}`;
+  title.classList.remove("pending");
+  setSub(job, [info.album, info.year]);
 }
 
 function showCover(job, url) {
@@ -757,7 +1090,7 @@ function setState(job, state, label) {
 
 function refreshStats() {
   const all = [...jobs.values()];
-  const done = all.filter((j) => j.state === "done" || j.state === "duplicate").length;
+  const done = all.filter((j) => ["done", "duplicate", "trim_ready"].includes(j.state)).length;
   const failed = all.filter((j) => j.state === "error").length;
   $("empty").hidden = all.length > 0;
   $("clear").hidden = done === 0;
@@ -777,7 +1110,7 @@ function onJobEvent(e) {
     title.textContent = m.title || job.url;
     title.classList.remove("pending");
     setSub(job, [SOURCES[m.extractor_key], m.uploader]);
-    if (m.duration) el.querySelector(".badge").textContent = clock(Math.round(m.duration));
+    if (m.duration) el.querySelector(".badge").textContent = clock(m.duration);
     if (!videoId(job.url) && m.thumbnail && !job.thumbSet) {
       job.thumbSet = true;
       el.querySelector("img").src = m.thumbnail;
@@ -811,12 +1144,20 @@ function onJobEvent(e) {
     case "done": {
       job.path = e.path;
       const info = e.info || {};
-      if (info.title) {
-        el.querySelector(".title").textContent = `${info.artist} – ${info.title}`;
-        setSub(job, [info.album, info.year]);
-      }
+      if (info.title) showInfo(job, info);
       if (info.cover_url) showCover(job, info.cover_url);
+      el.classList.toggle("multi", e.count > 1);
       setState(job, "done", e.count > 1 ? `✓ ${e.count} canciones` : "✓ Lista");
+      break;
+    }
+    case "trim_ready": {
+      job.path = e.path;
+      const info = e.info || {};
+      if (info.title) showInfo(job, info);
+      if (info.cover_url) showCover(job, info.cover_url);
+      job.cover = info.cover_url;
+      setState(job, "trim_ready", "Lista para recortar · toca ✂");
+      if (!trimJob) openTrimmer(job);
       break;
     }
     case "duplicate":
@@ -839,7 +1180,9 @@ function onEngine(e) {
     error: "Error en el motor",
   }[e.state];
   $("engine-txt").textContent = txt;
-  pill.title = e.state === "error" ? e.message : "Motor de descargas (yt-dlp), se actualiza solo";
+  pill.dataset.tip = e.state === "error"
+    ? e.message
+    : "Motor de descargas (yt-dlp). Se actualiza solo cada vez que abres la app";
 }
 
 function onUpdate(e) {
@@ -861,15 +1204,263 @@ function onUpdate(e) {
 window.onEngineEvent = (e) =>
   e.type === "engine" ? onEngine(e) : e.type === "update" ? onUpdate(e) : onJobEvent(e);
 
+/* ---------- Guia ---------- */
+function openHelp() { $("help").hidden = false; }
+function closeHelp() {
+  $("help").hidden = true;
+  api && api.mark_help_seen();
+}
+$("help-open").addEventListener("click", openHelp);
+$("help-close").addEventListener("click", closeHelp);
+$("help-ok").addEventListener("click", closeHelp);
+$("help").addEventListener("click", (e) => { if (e.target === $("help")) closeHelp(); });
+
+/* ---------- Editor de recorte ---------- */
+const MIN_LEN = 0.5;
+let trimJob = null;    // tarjeta que se esta recortando
+let tr = null;         // { duration, peaks, start, end }
+const audio = new Audio();
+audio.preload = "auto";
+
+async function openTrimmer(job) {
+  trimJob = job;
+  tr = null;
+  $("trimmer").hidden = false;
+  $("trim-loading").hidden = false;
+  $("trim-loading").textContent = "Cargando la canción…";
+  $("trim-ui").hidden = true;
+  $("trim-save").disabled = true;
+  $("trim-msg").textContent = "";
+  $("trim-msg").classList.remove("err");
+  $("trim-name").textContent = job.el.querySelector(".title").textContent;
+  const cover = job.el.querySelector(".thumb img").src;
+  $("trim-cover").src = cover || "";
+  $("trim-cover").hidden = !cover;
+
+  const data = await api.open_trim(job.id);
+  if (trimJob !== job) return;
+  if (data.error) { $("trim-loading").textContent = data.error; return; }
+  $("trim-full").hidden = !data.temp;
+  tr = { duration: data.duration, peaks: data.peaks, start: 0, end: data.duration };
+  audio.src = data.url;
+  audio.currentTime = 0;
+  $("ruler-mid").textContent = clock(data.duration / 2);
+  $("ruler-end").textContent = clock(data.duration);
+  $("trim-loading").hidden = true;
+  $("trim-ui").hidden = false;
+  $("trim-save").disabled = false;
+  drawWave();
+  layoutTrim();
+}
+
+function closeTrimmer() {
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.load();
+  $("trimmer").hidden = true;
+  trimJob = null;
+  tr = null;
+}
+
+function drawWave() {
+  const canvas = $("wave");
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(rect.width * dpr);
+  canvas.height = Math.round(rect.height * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const bars = Math.floor(rect.width / 3);
+  const per = tr.peaks.length / bars;
+  const mid = rect.height / 2;
+  const grad = ctx.createLinearGradient(0, 0, rect.width, 0);
+  const css = getComputedStyle(document.documentElement);
+  grad.addColorStop(0, css.getPropertyValue("--accent-1").trim());
+  grad.addColorStop(1, css.getPropertyValue("--accent-2").trim());
+  ctx.fillStyle = grad;
+  for (let i = 0; i < bars; i++) {
+    let v = 0;
+    for (let j = Math.floor(i * per); j < Math.floor((i + 1) * per); j++) v = Math.max(v, tr.peaks[j] || 0);
+    const h = Math.max(2, v * (rect.height - 16));
+    ctx.fillRect(i * 3 + 0.5, mid - h / 2, 2, h);
+  }
+}
+
+function pct(t) { return (t / tr.duration) * 100; }
+
+function layoutTrim() {
+  const a = pct(tr.start), b = pct(tr.end);
+  $("frame").style.left = a + "%";
+  $("frame").style.width = (b - a) + "%";
+  $("dim-l").style.width = a + "%";
+  $("dim-r").style.width = (100 - b) + "%";
+  if (document.activeElement !== $("t-start")) $("t-start").value = clock(tr.start, 1);
+  if (document.activeElement !== $("t-end")) $("t-end").value = clock(tr.end, 1);
+  $("t-len").textContent = clock(tr.end - tr.start, 1);
+  $("playhead").style.left = pct(audio.currentTime || tr.start) + "%";
+}
+
+function setRange(start, end) {
+  start = Math.max(0, Math.min(start, tr.duration - MIN_LEN));
+  end = Math.min(tr.duration, Math.max(end, start + MIN_LEN));
+  tr.start = start;
+  tr.end = end;
+  layoutTrim();
+}
+
+// Arrastre: bordes = inicio/fin, marco = mover, resto de la onda = escuchar desde ahi
+let drag = null;
+$("strip").addEventListener("pointerdown", (e) => {
+  if (!tr) return;
+  const rect = $("strip").getBoundingClientRect();
+  const at = ((e.clientX - rect.left) / rect.width) * tr.duration;
+  const target = e.target.closest(".handle, .frame");
+  if (target && target.id === "handle-l") drag = { kind: "start" };
+  else if (target && target.id === "handle-r") drag = { kind: "end" };
+  else if (target) drag = { kind: "move", offset: at - tr.start, len: tr.end - tr.start };
+  else { seekTo(at); return; }
+  drag.rect = rect;
+  drag.wasPlaying = !audio.paused;
+  audio.pause();
+  try { $("strip").setPointerCapture(e.pointerId); } catch (_) { /* puntero sintetico */ }
+  e.preventDefault();
+});
+$("strip").addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const t = Math.max(0, Math.min(tr.duration, ((e.clientX - drag.rect.left) / drag.rect.width) * tr.duration));
+  if (drag.kind === "start") { setRange(Math.min(t, tr.end - MIN_LEN), tr.end); audio.currentTime = tr.start; }
+  else if (drag.kind === "end") { setRange(tr.start, Math.max(t, tr.start + MIN_LEN)); audio.currentTime = Math.max(tr.start, tr.end - 0.05); }
+  else {
+    const start = Math.max(0, Math.min(t - drag.offset, tr.duration - drag.len));
+    setRange(start, start + drag.len);
+    audio.currentTime = tr.start;
+  }
+  layoutTrim();
+});
+const endDrag = () => {
+  if (!drag) return;
+  if (drag.kind !== "end") audio.currentTime = tr.start;
+  drag = null;
+  layoutTrim();
+};
+$("strip").addEventListener("pointerup", endDrag);
+$("strip").addEventListener("pointercancel", endDrag);
+
+function seekTo(t) {
+  audio.currentTime = Math.max(0, Math.min(t, tr.duration));
+  layoutTrim();
+  if (audio.paused) play(false);
+}
+
+function play(fromStart = true) {
+  if (!tr) return;
+  const t = audio.currentTime;
+  if (fromStart && (t < tr.start || t >= tr.end - 0.05)) audio.currentTime = tr.start;
+  audio.play();
+}
+
+function togglePlay() { audio.paused ? play() : audio.pause(); }
+
+function tick() {
+  if (tr && !$("trimmer").hidden) {
+    // Al reproducir el fragmento, parar al llegar al final (no mientras salta
+    // a otra posicion: durante el salto WebKit aun reporta la posicion vieja)
+    if (!audio.paused && !audio.seeking && audio.currentTime >= tr.end && audio.currentTime - tr.end < 0.5) {
+      audio.pause();
+      audio.currentTime = tr.start;
+    }
+    $("playhead").style.left = pct(audio.currentTime) + "%";
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+audio.addEventListener("play", () => {
+  $("play-icon").innerHTML = '<path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/>';
+});
+audio.addEventListener("pause", () => {
+  $("play-icon").innerHTML = '<path d="M8 5.5v13l11-6.5z"/>';
+});
+
+$("play").addEventListener("click", togglePlay);
+$("play-end").addEventListener("click", () => {
+  if (!tr) return;
+  audio.currentTime = Math.max(tr.start, tr.end - 3);
+  audio.play();
+});
+["t-start", "t-end"].forEach((id) => {
+  const commit = () => {
+    if (!tr) return;
+    const v = parseTime($(id).value);
+    if (!Number.isNaN(v)) {
+      if (id === "t-start") setRange(Math.min(v, tr.end - MIN_LEN), tr.end);
+      else setRange(tr.start, Math.max(v, tr.start + MIN_LEN));
+      audio.currentTime = tr.start;
+    }
+    $(id).blur();
+    layoutTrim();
+  };
+  $(id).addEventListener("change", commit);
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") commit(); });
+});
+
+$("trim-save").addEventListener("click", async () => {
+  if (!tr || !trimJob) return;
+  const job = trimJob;
+  audio.pause();
+  $("trim-save").disabled = true;
+  $("trim-msg").classList.remove("err");
+  $("trim-msg").textContent = "Guardando…";
+  const res = await api.save_trim(job.id, tr.start, tr.end);
+  if (res.error) {
+    $("trim-msg").textContent = res.error;
+    $("trim-msg").classList.add("err");
+    $("trim-save").disabled = false;
+    return;
+  }
+  job.path = res.path;
+  setState(job, "done", `✓ Recorte guardado · ${clock(tr.start)}–${clock(tr.end)}`);
+  closeTrimmer();
+});
+$("trim-full").addEventListener("click", async () => {
+  if (!trimJob) return;
+  $("trim-full").disabled = true;
+  const res = await api.save_full(trimJob.id);
+  $("trim-full").disabled = false;
+  $("trim-msg").classList.toggle("err", !!res.error);
+  $("trim-msg").textContent = res.error || "✓ Canción completa guardada";
+  if (!res.error) $("trim-full").hidden = true;
+});
+$("trim-close").addEventListener("click", closeTrimmer);
+$("trim-cancel").addEventListener("click", closeTrimmer);
+window.addEventListener("resize", () => { if (tr && !$("trimmer").hidden) { drawWave(); layoutTrim(); } });
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    if (!$("trimmer").hidden) closeTrimmer();
+    else if (!$("help").hidden) closeHelp();
+  }
+  const typing = /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+  if (e.code === "Space" && !typing && !$("trimmer").hidden) {
+    e.preventDefault();
+    togglePlay();
+  }
+});
+
 /* ---------- Arranque ---------- */
 async function start() {
   api = window.pywebview.api;
   const { settings, platform, version } = await api.init();
   $("ver").textContent = version;
+  $("help-ver").textContent = `Sonora ${version}`;
+  if (!settings.seen_help) openHelp();
   setQuality(settings.quality);
   $("folder-path").textContent = shortPath(settings.out_dir);
   $("folder").title = settings.out_dir;
-  if (platform !== "darwin") $("kbd").textContent = "Ctrl ↩";
+  if (platform !== "darwin") {
+    $("kbd").textContent = "Ctrl ↩";
+    document.querySelectorAll(".kbd-label").forEach((k) => (k.textContent = "Ctrl ↩"));
+  }
   refreshStats();
 }
 

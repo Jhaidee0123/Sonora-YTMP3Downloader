@@ -25,6 +25,7 @@ from pathlib import Path
 import certifi
 
 import tagger
+import trimmer
 from library import Library, url_key
 
 APP_NAME = "Sonora"
@@ -89,6 +90,8 @@ def data_dir():
 BIN_DIR = data_dir() / "bin"
 EXE = ".exe" if IS_WIN else ""
 YTDLP_PATH = BIN_DIR / f"yt-dlp{EXE}"
+# Canciones descargadas para recortar: se borran al cerrar la app
+TRIM_DIR = data_dir() / "trim"
 DENO_PATH = BIN_DIR / f"deno{EXE}"
 
 
@@ -233,6 +236,8 @@ class Engine:
         self.ffmpeg_dir = None
         self.deno_path = None
         self.library = Library(data_dir() / "library.json")
+        self.sources = {}
+        shutil.rmtree(TRIM_DIR, ignore_errors=True)  # restos de una sesion anterior
         self._update_lock = threading.Lock()
         self._procs = set()
 
@@ -265,19 +270,26 @@ class Engine:
         finally:
             self._update_lock.release()
 
-    def download(self, job_id, url, quality, out_dir, section=None, force=False):
+    def download(self, job_id, url, quality, out_dir, force=False, trim=False):
+        """Descarga una URL. Con `trim` la cancion completa queda aparte, lista
+        para recortarla en la app, y solo se guarda lo que se recorte."""
         self.ready.wait()
         if self.error:
             self.emit({"type": "job", "id": job_id, "state": "error", "message": self.error})
             return
 
-        if not force:
-            existing = self.library.find(url_key(url), quality, section)
-            if existing:
-                self.emit({"type": "job", "id": job_id, "state": "duplicate", "path": existing})
-                return
+        existing = None if force else self.library.find(url_key(url), quality, None)
+        if existing and trim:
+            # Ya la tenias completa: se recorta desde ese archivo, sin descargar
+            self._register(job_id, existing, quality, out_dir, {url_key(url)}, temp=False)
+            self.emit({"type": "job", "id": job_id, "state": "trim_ready", "path": existing})
+            return
+        if existing:
+            self._register(job_id, existing, quality, out_dir, {url_key(url)}, temp=False)
+            self.emit({"type": "job", "id": job_id, "state": "duplicate", "path": existing})
+            return
 
-        args = (job_id, url, quality, out_dir, section, force)
+        args = (job_id, url, quality, out_dir, force, trim)
         errors = self._run_download(*args)
         if errors and any("403" in e or "Forbidden" in e for e in errors):
             # YouTube suele bloquear versiones viejas: actualizar y reintentar
@@ -287,17 +299,17 @@ class Engine:
         if errors:
             self.emit({"type": "job", "id": job_id, "state": "error", "message": errors[-1]})
 
-    def _run_download(self, job_id, url, quality, out_dir, section, force):
+    def _run_download(self, job_id, *args):
         """Ejecuta yt-dlp. Devuelve la lista de errores ([] si todo salio bien)."""
         staging = data_dir() / "staging" / job_id
         shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir(parents=True)
         try:
-            return self._download_to(staging, job_id, url, quality, out_dir, section, force)
+            return self._download_to(staging, job_id, *args)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
-    def _download_to(self, staging, job_id, url, quality, out_dir, section, force):
+    def _download_to(self, staging, job_id, url, quality, out_dir, force, trim):
         cmd = [
             str(YTDLP_PATH), url,
             "--no-playlist", "--newline", "--progress", "--no-colors",
@@ -312,12 +324,6 @@ class Engine:
             "--progress-template",
             "download:PROG %(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
         ]
-        if section:
-            end = section[1] if section[1] else "inf"
-            cmd += ["--download-sections", f"*{section[0]}-{end}", "--force-keyframes-at-cuts"]
-            # ffmpeg no puede recortar desde DASH (Mixcloud): preferir otro formato
-            fmt = cmd.index("-f") + 1
-            cmd[fmt] = f"bestaudio[protocol!*=dash]/{cmd[fmt]}"
         self.emit({"type": "job", "id": job_id, "state": "starting"})
 
         try:
@@ -339,13 +345,16 @@ class Engine:
                 except ValueError:
                     continue
                 self.emit({"type": "job", "id": job_id, "state": "downloading", "meta": meta})
+                key = f"{meta['extractor_key']}:{meta['id']}"
                 existing = None if force or meta.get("playlist_index") else self.library.find(
-                    f"{meta['extractor_key']}:{meta['id']}", quality, section)
+                    key, quality, None)
                 if existing:
                     proc.kill()
                     proc.wait()
                     self._procs.discard(proc)
-                    self.emit({"type": "job", "id": job_id, "state": "duplicate", "path": existing})
+                    self._register(job_id, existing, quality, out_dir, {key}, temp=False)
+                    state = "trim_ready" if trim else "duplicate"
+                    self.emit({"type": "job", "id": job_id, "state": state, "path": existing})
                     return []
             elif line.startswith("PROG "):
                 pct, speed, eta = (line[5:].split("|") + ["", ""])[:3]
@@ -370,18 +379,33 @@ class Engine:
             return errors or [f"yt-dlp terminó con código {proc.returncode}"]
 
         self.emit({"type": "job", "id": job_id, "state": "tagging"})
+        if trim and len(done) == 1:
+            meta, staged = done[0]
+            info = self._tag(meta, staged, url)
+            holder = TRIM_DIR / job_id
+            holder.mkdir(parents=True, exist_ok=True)
+            source = holder / tagger.filename(info, staged.suffix.lstrip("."))
+            shutil.move(str(staged), source)
+            keys = {url_key(url), f"{meta['extractor_key']}:{meta['id']}"}
+            self._register(job_id, source, quality, out_dir, keys, temp=True)
+            self.emit({"type": "job", "id": job_id, "state": "trim_ready",
+                       "path": str(source), "info": _public(info)})
+            return []
+
         result = None
         for item_meta, staged in done:
-            result = self._finish(item_meta, staged, url, quality, out_dir, section, force)
+            result = self._finish(item_meta, staged, url, quality, out_dir, force)
+        self._register(job_id, result["path"], quality, out_dir, result["keys"], temp=False)
         if len(done) == 1 and result["duplicate"]:
             # Ya existia un archivo con ese nombre en la carpeta
             self.emit({"type": "job", "id": job_id, "state": "duplicate", "path": result["path"]})
         else:
-            self.emit({"type": "job", "id": job_id, "state": "done", "count": len(done), **result})
+            self.emit({"type": "job", "id": job_id, "state": "done", "count": len(done),
+                       "path": result["path"], "info": result["info"]})
         return []
 
-    def _finish(self, meta, staged, url, quality, out_dir, section, force):
-        """Etiqueta el archivo y lo mueve a la carpeta final con un nombre limpio."""
+    def _tag(self, meta, staged, url):
+        """Limpia el titulo, busca la caratula y escribe las etiquetas en el archivo."""
         try:
             info = tagger.resolve(meta)
         except Exception:  # noqa: BLE001 - sin datos oficiales se usa lo adivinado
@@ -396,35 +420,86 @@ class Engine:
         thumb = staged.with_suffix(".jpg")
         if cover is None and thumb.exists():
             try:
-                cover = tagger.square_thumbnail(thumb, str(self.ffmpeg_dir / f"ffmpeg{EXE}"))
+                cover = tagger.square_thumbnail(thumb, self.ffmpeg)
             except (OSError, subprocess.CalledProcessError):
                 cover = None
         try:
             tagger.write_tags(staged, info, cover, meta.get("webpage_url") or url)
         except Exception:  # noqa: BLE001 - un error de etiquetas no debe perder la cancion
             pass
+        return info
 
-        out_dir = Path(out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        dest = out_dir / tagger.filename(info, staged.suffix.lstrip("."), section)
+    def _finish(self, meta, staged, url, quality, out_dir, force):
+        """Etiqueta el archivo y lo mueve a la carpeta final con un nombre limpio."""
+        info = self._tag(meta, staged, url)
+        dest = Path(out_dir) / tagger.filename(info, staged.suffix.lstrip("."))
         duplicate = dest.exists() and not force
         if duplicate:
             staged.unlink()
         else:
-            base, n = dest, 2
-            while dest.exists():
-                dest = base.with_name(f"{base.stem} ({n}){base.suffix}")
-                n += 1
-            shutil.move(str(staged), dest)
+            dest = _place(staged, dest, move=True)
 
         keys = {url_key(url), f"{meta['extractor_key']}:{meta['id']}"}
-        self.library.add(keys, quality, section, dest)
-        return {
-            "path": str(dest),
-            "duplicate": duplicate,
-            "info": {k: info.get(k) for k in ("artist", "title", "album", "year", "cover_url")},
+        self.library.add(keys, quality, None, dest)
+        return {"path": str(dest), "duplicate": duplicate, "keys": keys, "info": _public(info)}
+
+    # ------------------------------------------------------------ Recortes
+
+    @property
+    def ffmpeg(self):
+        return str(self.ffmpeg_dir / f"ffmpeg{EXE}")
+
+    def _register(self, job_id, path, quality, out_dir, keys, temp):
+        """Recuerda el archivo de cada tarjeta para poder recortarlo despues."""
+        self.sources[job_id] = {
+            "path": Path(path), "quality": quality, "out_dir": out_dir,
+            "keys": keys, "temp": temp,
         }
+
+    def source(self, job_id):
+        return self.sources.get(job_id)
+
+    def save_cut(self, job_id, start, end):
+        """Guarda el fragmento [start, end] como un archivo nuevo en la carpeta."""
+        src = self.sources[job_id]
+        start, end = round(float(start), 2), round(float(end), 2)
+        name = tagger.section_name(src["path"].stem, start, end, src["path"].suffix)
+        tmp = TRIM_DIR / f"{job_id}-cut{src['path'].suffix}"
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        trimmer.cut(src["path"], tmp, start, end, self.ffmpeg)
+        try:
+            tagger.copy_tags(src["path"], tmp)
+        except Exception:  # noqa: BLE001
+            pass
+        dest = _place(tmp, Path(src["out_dir"]) / name, move=True)
+        self.library.add(src["keys"], src["quality"], (start, end), dest)
+        return str(dest)
+
+    def save_full(self, job_id):
+        """Guarda tambien la cancion completa de una descarga hecha para recortar."""
+        src = self.sources[job_id]
+        if not src["temp"]:
+            return str(src["path"])
+        dest = _place(src["path"], Path(src["out_dir"]) / src["path"].name, move=False)
+        self.library.add(src["keys"], src["quality"], None, dest)
+        return str(dest)
 
     def shutdown(self):
         for proc in list(self._procs):
             proc.kill()
+        shutil.rmtree(TRIM_DIR, ignore_errors=True)
+
+
+def _public(info):
+    return {k: info.get(k) for k in ("artist", "title", "album", "year", "cover_url")}
+
+
+def _place(src, dest, move):
+    """Mueve/copia `src` a `dest` sin pisar archivos: agrega (2), (3)..."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    base, n = dest, 2
+    while dest.exists():
+        dest = base.with_name(f"{base.stem} ({n}){base.suffix}")
+        n += 1
+    (shutil.move if move else shutil.copy2)(str(src), dest)
+    return dest

@@ -143,11 +143,8 @@ def resolve(meta):
     return info
 
 
-def filename(info, ext, section=None):
-    name = f"{info['artist']} - {info['title']}"
-    if section:
-        name += f" [{_clock(section[0])}-{_clock(section[1]) if section[1] else 'fin'}]"
-    name = FILENAME_BAD_RE.sub("", name).strip(". ")
+def filename(info, ext):
+    name = FILENAME_BAD_RE.sub("", f"{info['artist']} - {info['title']}").strip(". ")
     return f"{name[:180]}.{ext}"
 
 
@@ -331,3 +328,32 @@ def write_tags(path, info, cover, source_url):
         if cover:
             audio["covr"] = [MP4Cover(cover, imageformat=MP4Cover.FORMAT_JPEG)]
         audio.save()
+
+
+def copy_tags(src, dst):
+    """Copia etiquetas y caratula de `src` a `dst` (mismo formato), para los recortes."""
+    ext = src.suffix.lower()
+    if ext == ".mp3":
+        try:
+            ID3(src).save(dst, v2_version=3)
+        except ID3NoHeaderError:
+            pass
+    elif ext == ".flac":
+        source, target = FLAC(src), FLAC(dst)
+        target.delete()
+        for key, values in (source.tags or {}).items():
+            target[key] = values
+        for pic in source.pictures:
+            target.add_picture(pic)
+        target.save()
+    elif ext in (".m4a", ".mp4"):
+        source, target = MP4(src), MP4(dst)
+        target.delete()
+        for key, values in (source.tags or {}).items():
+            target[key] = values
+        target.save()
+
+
+def section_name(stem, start, end, ext):
+    """'Artista - Cancion [1m20s-4m10s].flac'"""
+    return f"{stem} [{_clock(start)}-{_clock(end)}]{ext}"

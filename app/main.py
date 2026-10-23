@@ -17,6 +17,7 @@ from pathlib import Path
 
 import webview
 
+import trimmer
 import updater
 from engine import APP_NAME, IS_MAC, IS_WIN, QUALITIES, Engine, data_dir, parse_urls
 from version import __version__
@@ -25,6 +26,7 @@ SETTINGS_PATH = data_dir() / "settings.json"
 DEFAULT_SETTINGS = {
     "out_dir": str(Path.home() / "Music" / APP_NAME),
     "quality": "flac",
+    "seen_help": False,
 }
 MAX_PARALLEL = 3
 
@@ -53,6 +55,7 @@ class Api:
         self._pool = ThreadPoolExecutor(max_workers=MAX_PARALLEL)
         self._jobs = {}
         self._update = None
+        self._media = trimmer.MediaServer()
 
     def _emit(self, event):
         if self._window:
@@ -67,13 +70,12 @@ class Api:
         threading.Thread(target=self._check_update, daemon=True).start()
         return {"settings": self._settings, "platform": sys.platform, "version": __version__}
 
-    def add_urls(self, text, section=None):
-        """`section` es [inicio, fin] en segundos (fin None = hasta el final)."""
-        section = tuple(section) if section else None
+    def add_urls(self, text, trim=False):
+        """Con `trim` se descarga completa y se abre el editor para recortarla."""
         jobs = []
         for url in parse_urls(text):
             job_id = uuid.uuid4().hex[:8]
-            self._jobs[job_id] = {"url": url, "section": section}
+            self._jobs[job_id] = {"url": url, "trim": bool(trim)}
             jobs.append({"id": job_id, "url": url})
             self._submit(job_id)
         return jobs
@@ -91,8 +93,39 @@ class Api:
         job = self._jobs[job_id]
         self._pool.submit(
             self._engine.download, job_id, job["url"], self._settings["quality"],
-            self._settings["out_dir"], job["section"], force,
+            self._settings["out_dir"], force, job["trim"],
         )
+
+    def open_trim(self, job_id):
+        """Datos para el editor de recorte: audio, forma de onda y duracion."""
+        src = self._engine.source(job_id)
+        if not src or not src["path"].exists():
+            return {"error": "No se encontró el archivo de esta canción"}
+        wave, duration = trimmer.peaks(src["path"], self._engine.ffmpeg)
+        return {
+            "url": self._media.url_for(src["path"]),
+            "peaks": wave,
+            "duration": duration,
+            "name": src["path"].stem,
+            "temp": src["temp"],
+        }
+
+    def save_trim(self, job_id, start, end):
+        try:
+            path = self._engine.save_cut(job_id, start, end)
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"No se pudo recortar: {e}"}
+        return {"path": path}
+
+    def save_full(self, job_id):
+        try:
+            return {"path": self._engine.save_full(job_id)}
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"No se pudo guardar: {e}"}
+
+    def mark_help_seen(self):
+        self._settings["seen_help"] = True
+        self._save_settings()
 
     def _check_update(self):
         try:

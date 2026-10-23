@@ -54,6 +54,14 @@ Con Demucs (modelo de IA, funciona sin internet) para hacer acapellas e instrume
 - Pesa unos 2 GB (PyTorch + modelo): convendría descargarlo solo si se activa la función.
 - En CPU tarda varios minutos por canción (en la i9 unos 3–5 min).
 
+## 7. Mejoras del editor de recorte
+
+- **Zoom en la onda:** en mezclas de una hora cada píxel equivale a varios segundos;
+  hoy la precisión se logra escribiendo los tiempos. Un zoom (pellizco o rueda)
+  permitiría cortar a ojo con precisión de milisegundos.
+- **Fundidos (fade in / fade out)** opcionales al guardar el recorte.
+- **Ajustar al beat:** que los bordes "se peguen" a los golpes detectados en la onda.
+
 ## Descartado por ahora
 
 - **Detección de BPM y tonalidad:** rekordbox y Serato ya lo hacen al analizar, y mejor.
